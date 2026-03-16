@@ -16,13 +16,18 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
 
       const collectionConfig = req.payload.collections[input.collectionSlug].config
 
-      let staticDir: string = collectionConfig.upload.staticDir
+      let staticDir: string =
+        typeof collectionConfig.upload === 'object' ? collectionConfig.upload.staticDir || '' : ''
+      if (!staticDir) {
+        throw new Error(`No staticDir configured for collection "${input.collectionSlug}"`)
+      }
       if (!path.isAbsolute(staticDir)) {
         staticDir = path.resolve(process.cwd(), staticDir)
       }
 
-      const filePath = path.join(staticDir, doc.filename)
-      const dir = path.dirname(filePath)
+      // Sanitize filename to prevent path traversal
+      const safeFilename = path.basename(doc.filename)
+      const filePath = path.join(staticDir, safeFilename)
       const fileBuffer = await fs.readFile(filePath)
 
       const variants: Array<{
@@ -37,9 +42,9 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
 
       for (const format of resolvedConfig.formats) {
         const result = await convertFormat(fileBuffer, format.format, format.quality)
-        const variantFilename = `${path.parse(doc.filename).name}-optimized.${format.format}`
+        const variantFilename = `${path.parse(safeFilename).name}-optimized.${format.format}`
 
-        await fs.writeFile(path.join(dir, variantFilename), result.buffer)
+        await fs.writeFile(path.join(staticDir, variantFilename), result.buffer)
 
         variants.push({
           format: format.format,
@@ -68,17 +73,24 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err)
 
-      await req.payload.update({
-        collection: input.collectionSlug as CollectionSlug,
-        id: input.docId,
-        data: {
-          imageOptimizer: {
-            status: 'error',
-            error: errorMessage,
+      try {
+        await req.payload.update({
+          collection: input.collectionSlug as CollectionSlug,
+          id: input.docId,
+          data: {
+            imageOptimizer: {
+              status: 'error',
+              error: errorMessage,
+            },
           },
-        },
-        context: { imageOptimizer_skip: true },
-      })
+          context: { imageOptimizer_skip: true },
+        })
+      } catch (updateErr) {
+        req.payload.logger.error(
+          { err: updateErr },
+          'Failed to persist error status for image optimizer',
+        )
+      }
 
       throw err
     }

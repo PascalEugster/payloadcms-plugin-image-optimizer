@@ -9,11 +9,11 @@ export const createBeforeChangeHook = (
   return async ({ context, data, req }) => {
     if (context?.imageOptimizer_skip) return data
 
-    if (!req.file || !req.file.mimetype?.startsWith('image/')) return data
+    if (!req.file || !req.file.data || !req.file.mimetype?.startsWith('image/')) return data
 
     const originalSize = req.file.data.length
 
-    // Process in memory for blur placeholder and size calculations
+    // Process in memory: strip EXIF, resize, generate blur
     const processed = await stripAndResize(
       req.file.data,
       resolvedConfig.maxDimensions,
@@ -30,7 +30,8 @@ export const createBeforeChangeHook = (
       data.imageOptimizer.blurDataURL = await generateBlurDataURL(processed.buffer)
     }
 
-    // Store the processed buffer in context so afterChange can use it to overwrite the file on disk
+    // Store processed buffer in context for afterChange to write to disk
+    // (Payload 3.0 does not use modified req.file.data for the disk write)
     context.imageOptimizer_processedBuffer = processed.buffer
 
     return data
