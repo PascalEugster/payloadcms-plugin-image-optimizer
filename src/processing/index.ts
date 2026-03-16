@@ -1,4 +1,5 @@
 import sharp from 'sharp'
+import { rgbaToThumbHash } from 'thumbhash'
 
 export async function stripAndResize(
   buffer: Buffer,
@@ -26,14 +27,15 @@ export async function stripAndResize(
   }
 }
 
-export async function generateBlurDataURL(buffer: Buffer): Promise<string> {
-  const blurBuffer = await sharp(buffer)
-    .resize(16)
-    .blur()
-    .png({ compressionLevel: 9 })
-    .toBuffer()
+export async function generateThumbHash(buffer: Buffer): Promise<string> {
+  const { data, info } = await sharp(buffer)
+    .resize(100, 100, { fit: 'inside' })
+    .raw()
+    .ensureAlpha()
+    .toBuffer({ resolveWithObject: true })
 
-  return `data:image/png;base64,${blurBuffer.toString('base64')}`
+  const thumbHash = rgbaToThumbHash(info.width, info.height, data)
+  return Buffer.from(thumbHash).toString('base64')
 }
 
 export async function convertFormat(

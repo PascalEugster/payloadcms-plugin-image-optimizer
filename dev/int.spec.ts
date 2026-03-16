@@ -85,7 +85,7 @@ describe('Image Optimizer Plugin', () => {
     expect(metadata.height).toBeLessThanOrEqual(2560)
   })
 
-  test('should generate blur placeholder as valid base64 data URI', async () => {
+  test('should generate thumbHash as valid base64 string', async () => {
     const buffer = await createTestImage(400, 300)
 
     const doc = await payload.create({
@@ -99,14 +99,13 @@ describe('Image Optimizer Plugin', () => {
       },
     })
 
-    expect(doc.imageOptimizer.blurDataURL).toBeDefined()
-    expect(doc.imageOptimizer.blurDataURL).toMatch(/^data:image\/png;base64,/)
+    expect(doc.imageOptimizer.thumbHash).toBeDefined()
+    expect(typeof doc.imageOptimizer.thumbHash).toBe('string')
+    expect(doc.imageOptimizer.thumbHash.length).toBeGreaterThan(0)
 
-    // Verify it decodes to a valid image
-    const base64 = doc.imageOptimizer.blurDataURL.replace('data:image/png;base64,', '')
-    const blurBuffer = Buffer.from(base64, 'base64')
-    const blurMeta = await sharp(blurBuffer).metadata()
-    expect(blurMeta.width).toBe(16)
+    // Verify it's valid base64 that decodes without error
+    const decoded = Buffer.from(doc.imageOptimizer.thumbHash, 'base64')
+    expect(decoded.length).toBeGreaterThan(0)
   })
 
   test('should generate format variants via async job', async () => {

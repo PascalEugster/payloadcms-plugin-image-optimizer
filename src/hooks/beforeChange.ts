@@ -2,7 +2,7 @@ import type { CollectionBeforeChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveCollectionConfig } from '../defaults.js'
-import { generateBlurDataURL, stripAndResize } from '../processing/index.js'
+import { generateThumbHash, stripAndResize } from '../processing/index.js'
 
 export const createBeforeChangeHook = (
   resolvedConfig: ResolvedImageOptimizerConfig,
@@ -30,8 +30,8 @@ export const createBeforeChangeHook = (
       status: 'pending',
     }
 
-    if (resolvedConfig.generateBlurPlaceholder) {
-      data.imageOptimizer.blurDataURL = await generateBlurDataURL(processed.buffer)
+    if (resolvedConfig.generateThumbHash) {
+      data.imageOptimizer.thumbHash = await generateThumbHash(processed.buffer)
     }
 
     // Store processed buffer in context for afterChange to write to disk

@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import { thumbHashToDataURL } from 'thumbhash'
 import { useAllFormFields } from '@payloadcms/ui'
 
 const formatBytes = (bytes: number): string => {
@@ -25,8 +26,18 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
   const status = formState[`${basePath}.status`]?.value as string | undefined
   const originalSize = formState[`${basePath}.originalSize`]?.value as number | undefined
   const optimizedSize = formState[`${basePath}.optimizedSize`]?.value as number | undefined
-  const blurDataURL = formState[`${basePath}.blurDataURL`]?.value as string | undefined
+  const thumbHash = formState[`${basePath}.thumbHash`]?.value as string | undefined
   const error = formState[`${basePath}.error`]?.value as string | undefined
+
+  const thumbHashUrl = React.useMemo(() => {
+    if (!thumbHash) return null
+    try {
+      const bytes = Uint8Array.from(atob(thumbHash), c => c.charCodeAt(0))
+      return thumbHashToDataURL(bytes)
+    } catch {
+      return null
+    }
+  }, [thumbHash])
 
   // Read variants array from form state
   const variantsField = formState[`${basePath}.variants`]
@@ -99,12 +110,12 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
         </div>
       )}
 
-      {blurDataURL && (
+      {thumbHashUrl && (
         <div style={{ marginBottom: '8px' }}>
           <div style={{ fontSize: '12px', marginBottom: '4px', opacity: 0.7 }}>Blur Preview</div>
           <img
             alt="Blur placeholder"
-            src={blurDataURL}
+            src={thumbHashUrl}
             style={{ borderRadius: '4px', height: '40px', width: 'auto' }}
           />
         </div>

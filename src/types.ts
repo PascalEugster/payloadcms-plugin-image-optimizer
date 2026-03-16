@@ -16,7 +16,7 @@ export type ImageOptimizerConfig = {
   collections: Partial<Record<CollectionSlug, true | CollectionOptimizerConfig>>
   disabled?: boolean
   formats?: FormatQuality[]
-  generateBlurPlaceholder?: boolean
+  generateThumbHash?: boolean
   maxDimensions?: { width: number; height: number }
   stripMetadata?: boolean
 }
@@ -27,7 +27,7 @@ export type ResolvedCollectionOptimizerConfig = {
 }
 
 export type ResolvedImageOptimizerConfig = Required<
-  Pick<ImageOptimizerConfig, 'formats' | 'generateBlurPlaceholder' | 'maxDimensions' | 'stripMetadata'>
+  Pick<ImageOptimizerConfig, 'formats' | 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>
 > & {
   collections: ImageOptimizerConfig['collections']
   disabled: boolean

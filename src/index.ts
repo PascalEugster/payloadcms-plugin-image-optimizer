@@ -9,6 +9,8 @@ import { createConvertFormatsHandler } from './tasks/convertFormats.js'
 
 export type { ImageOptimizerConfig, ImageFormat, FormatQuality, CollectionOptimizerConfig } from './types.js'
 
+export { encodeImageToThumbHash, decodeThumbHashToDataURL } from './utilities/thumbhash.js'
+
 export const imageOptimizer =
   (pluginOptions: ImageOptimizerConfig) =>
   (config: Config): Config => {

@@ -9,7 +9,7 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
     { format: 'webp', quality: 80 },
     { format: 'avif', quality: 65 },
   ],
-  generateBlurPlaceholder: config.generateBlurPlaceholder ?? true,
+  generateThumbHash: config.generateThumbHash ?? true,
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
   stripMetadata: config.stripMetadata ?? true,
 })

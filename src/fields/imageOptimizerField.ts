@@ -12,7 +12,7 @@ export const getImageOptimizerField = (): GroupField => ({
   },
   fields: [
     {
-      name: 'blurDataURL',
+      name: 'thumbHash',
       type: 'text',
     },
     {
