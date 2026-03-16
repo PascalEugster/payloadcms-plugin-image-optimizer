@@ -15,7 +15,7 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
         id: input.docId,
       })
 
-      const collectionConfig = req.payload.collections[input.collectionSlug].config
+      const collectionConfig = req.payload.collections[input.collectionSlug as keyof typeof req.payload.collections].config
 
       let staticDir: string =
         typeof collectionConfig.upload === 'object' ? collectionConfig.upload.staticDir || '' : ''

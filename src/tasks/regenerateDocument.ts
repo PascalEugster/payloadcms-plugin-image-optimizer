@@ -20,7 +20,7 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
         return { output: { status: 'skipped', reason: 'not-image' } }
       }
 
-      const collectionConfig = req.payload.collections[input.collectionSlug].config
+      const collectionConfig = req.payload.collections[input.collectionSlug as keyof typeof req.payload.collections].config
 
       let staticDir: string =
         typeof collectionConfig.upload === 'object' ? collectionConfig.upload.staticDir || '' : ''

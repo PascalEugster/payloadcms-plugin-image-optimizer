@@ -2,7 +2,7 @@
 
 import React from 'react'
 import NextImage, { type ImageProps } from 'next/image'
-import { thumbHashToDataURL } from 'thumbhash'
+import { getImageOptimizerProps } from '../utilities/getImageOptimizerProps.js'
 
 type ImageOptimizerData = {
   thumbHash?: string | null
@@ -32,6 +32,7 @@ export const ImageBox: React.FC<ImageBoxProps> = ({
   sizes,
   priority,
   loading: loadingFromProps,
+  style: styleFromProps,
   ...props
 }) => {
   const loading = priority ? undefined : (loadingFromProps ?? 'lazy')
@@ -45,7 +46,7 @@ export const ImageBox: React.FC<ImageBoxProps> = ({
         quality={80}
         fill={fill}
         sizes={sizes}
-        style={{ objectFit: 'cover', objectPosition: 'center' }}
+        style={{ objectFit: 'cover', objectPosition: 'center', ...styleFromProps }}
         priority={priority}
         loading={loading}
       />
@@ -57,22 +58,7 @@ export const ImageBox: React.FC<ImageBoxProps> = ({
   const alt = altFromProps || (media as any).alt || media.filename || ''
   const src = media.url ? `${media.url}${media.updatedAt ? `?${media.updatedAt}` : ''}` : ''
 
-  const objectPosition =
-    media.focalX != null && media.focalY != null
-      ? `${media.focalX}% ${media.focalY}%`
-      : 'center'
-
-  // Decode thumbhash to data URL for blur placeholder
-  const thumbHashUrl = React.useMemo(() => {
-    const thumbHash = media.imageOptimizer?.thumbHash
-    if (!thumbHash) return null
-    try {
-      const bytes = Uint8Array.from(atob(thumbHash), (c) => c.charCodeAt(0))
-      return thumbHashToDataURL(bytes)
-    } catch {
-      return null
-    }
-  }, [media.imageOptimizer?.thumbHash])
+  const optimizerProps = getImageOptimizerProps(media)
 
   return (
     <NextImage
@@ -84,9 +70,9 @@ export const ImageBox: React.FC<ImageBoxProps> = ({
       width={!fill ? width : undefined}
       height={!fill ? height : undefined}
       sizes={sizes}
-      style={{ objectFit: 'cover', objectPosition }}
-      placeholder={thumbHashUrl ? 'blur' : 'empty'}
-      blurDataURL={thumbHashUrl || undefined}
+      style={{ objectFit: 'cover', ...optimizerProps.style, ...styleFromProps }}
+      placeholder={optimizerProps.placeholder}
+      blurDataURL={optimizerProps.blurDataURL}
       priority={priority}
       loading={loading}
     />

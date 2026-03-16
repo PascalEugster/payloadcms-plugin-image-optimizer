@@ -17,7 +17,7 @@ export const createAfterChangeHook = (
     // Payload 3.0 writes the original buffer to disk; we replace it here
     const processedBuffer = context.imageOptimizer_processedBuffer as Buffer | undefined
     if (processedBuffer && doc.filename) {
-      const collectionConfig = req.payload.collections[collectionSlug].config
+      const collectionConfig = req.payload.collections[collectionSlug as keyof typeof req.payload.collections].config
       let staticDir: string =
         typeof collectionConfig.upload === 'object' ? collectionConfig.upload.staticDir || '' : ''
 
