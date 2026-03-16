@@ -6,6 +6,9 @@ export const getImageOptimizerField = (): GroupField => ({
   admin: {
     position: 'sidebar',
     readOnly: true,
+    components: {
+      Field: 'image-optimizer/client#OptimizationStatus',
+    },
   },
   fields: [
     {

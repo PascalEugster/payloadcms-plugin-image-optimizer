@@ -1,10 +1,12 @@
 import type { CollectionBeforeChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
+import { resolveCollectionConfig } from '../defaults.js'
 import { generateBlurDataURL, stripAndResize } from '../processing/index.js'
 
 export const createBeforeChangeHook = (
   resolvedConfig: ResolvedImageOptimizerConfig,
+  collectionSlug: string,
 ): CollectionBeforeChangeHook => {
   return async ({ context, data, req }) => {
     if (context?.imageOptimizer_skip) return data
@@ -13,10 +15,12 @@ export const createBeforeChangeHook = (
 
     const originalSize = req.file.data.length
 
+    const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug)
+
     // Process in memory: strip EXIF, resize, generate blur
     const processed = await stripAndResize(
       req.file.data,
-      resolvedConfig.maxDimensions,
+      perCollectionConfig.maxDimensions,
       resolvedConfig.stripMetadata,
     )
 

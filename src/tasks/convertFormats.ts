@@ -4,6 +4,7 @@ import path from 'path'
 import type { CollectionSlug } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
+import { resolveCollectionConfig } from '../defaults.js'
 import { convertFormat } from '../processing/index.js'
 
 export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimizerConfig) => {
@@ -40,7 +41,9 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
         width: number
       }> = []
 
-      for (const format of resolvedConfig.formats) {
+      const perCollectionConfig = resolveCollectionConfig(resolvedConfig, input.collectionSlug)
+
+      for (const format of perCollectionConfig.formats) {
         const result = await convertFormat(fileBuffer, format.format, format.quality)
         const variantFilename = `${path.parse(safeFilename).name}-optimized.${format.format}`
 

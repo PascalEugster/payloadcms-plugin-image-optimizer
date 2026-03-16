@@ -1,25 +1,7 @@
 'use client'
 
 import React from 'react'
-
-type VariantData = {
-  format?: string
-  filename?: string
-  filesize?: number
-  width?: number
-  height?: number
-  mimeType?: string
-  url?: string
-}
-
-type ImageOptimizerData = {
-  blurDataURL?: string
-  originalSize?: number
-  optimizedSize?: number
-  status?: 'pending' | 'processing' | 'complete' | 'error'
-  error?: string
-  variants?: VariantData[]
-}
+import { useAllFormFields } from '@payloadcms/ui'
 
 const formatBytes = (bytes: number): string => {
   if (bytes === 0) return '0 B'
@@ -36,14 +18,50 @@ const statusColors: Record<string, string> = {
   error: '#ef4444',
 }
 
-export const OptimizationStatus: React.FC<{ data?: ImageOptimizerData }> = ({ data }) => {
-  if (!data || !data.status) {
-    return null
+export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
+  const [formState] = useAllFormFields()
+  const basePath = props.path ?? 'imageOptimizer'
+
+  const status = formState[`${basePath}.status`]?.value as string | undefined
+  const originalSize = formState[`${basePath}.originalSize`]?.value as number | undefined
+  const optimizedSize = formState[`${basePath}.optimizedSize`]?.value as number | undefined
+  const blurDataURL = formState[`${basePath}.blurDataURL`]?.value as string | undefined
+  const error = formState[`${basePath}.error`]?.value as string | undefined
+
+  // Read variants array from form state
+  const variantsField = formState[`${basePath}.variants`]
+  const rowCount = (variantsField as any)?.rows?.length ?? 0
+  const variants: Array<{
+    format?: string
+    filename?: string
+    filesize?: number
+    width?: number
+    height?: number
+  }> = []
+
+  for (let i = 0; i < rowCount; i++) {
+    variants.push({
+      format: formState[`${basePath}.variants.${i}.format`]?.value as string | undefined,
+      filename: formState[`${basePath}.variants.${i}.filename`]?.value as string | undefined,
+      filesize: formState[`${basePath}.variants.${i}.filesize`]?.value as number | undefined,
+      width: formState[`${basePath}.variants.${i}.width`]?.value as number | undefined,
+      height: formState[`${basePath}.variants.${i}.height`]?.value as number | undefined,
+    })
+  }
+
+  if (!status) {
+    return (
+      <div style={{ padding: '12px 0' }}>
+        <div style={{ color: '#6b7280', fontSize: '13px' }}>
+          No optimization data yet. Upload an image to optimize.
+        </div>
+      </div>
+    )
   }
 
   const savings =
-    data.originalSize && data.optimizedSize
-      ? Math.round((1 - data.optimizedSize / data.originalSize) * 100)
+    originalSize && optimizedSize
+      ? Math.round((1 - optimizedSize / originalSize) * 100)
       : null
 
   return (
@@ -51,7 +69,7 @@ export const OptimizationStatus: React.FC<{ data?: ImageOptimizerData }> = ({ da
       <div style={{ marginBottom: '8px' }}>
         <span
           style={{
-            backgroundColor: statusColors[data.status] || '#6b7280',
+            backgroundColor: statusColors[status] || '#6b7280',
             borderRadius: '4px',
             color: '#fff',
             display: 'inline-block',
@@ -61,21 +79,19 @@ export const OptimizationStatus: React.FC<{ data?: ImageOptimizerData }> = ({ da
             textTransform: 'uppercase',
           }}
         >
-          {data.status}
+          {status}
         </span>
       </div>
 
-      {data.error && (
-        <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '8px' }}>{data.error}</div>
+      {error && (
+        <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '8px' }}>{error}</div>
       )}
 
-      {data.originalSize != null && data.optimizedSize != null && (
+      {originalSize != null && optimizedSize != null && (
         <div style={{ fontSize: '13px', marginBottom: '8px' }}>
+          <div>Original: <strong>{formatBytes(originalSize)}</strong></div>
           <div>
-            Original: <strong>{formatBytes(data.originalSize)}</strong>
-          </div>
-          <div>
-            Optimized: <strong>{formatBytes(data.optimizedSize)}</strong>
+            Optimized: <strong>{formatBytes(optimizedSize)}</strong>
             {savings != null && savings > 0 && (
               <span style={{ color: '#10b981', marginLeft: '4px' }}>(-{savings}%)</span>
             )}
@@ -83,21 +99,21 @@ export const OptimizationStatus: React.FC<{ data?: ImageOptimizerData }> = ({ da
         </div>
       )}
 
-      {data.blurDataURL && (
+      {blurDataURL && (
         <div style={{ marginBottom: '8px' }}>
           <div style={{ fontSize: '12px', marginBottom: '4px', opacity: 0.7 }}>Blur Preview</div>
           <img
             alt="Blur placeholder"
-            src={data.blurDataURL}
+            src={blurDataURL}
             style={{ borderRadius: '4px', height: '40px', width: 'auto' }}
           />
         </div>
       )}
 
-      {data.variants && data.variants.length > 0 && (
+      {variants.length > 0 && (
         <div>
           <div style={{ fontSize: '12px', marginBottom: '4px', opacity: 0.7 }}>Variants</div>
-          {data.variants.map((v, i) => (
+          {variants.map((v, i) => (
             <div key={i} style={{ fontSize: '12px', marginBottom: '2px' }}>
               <strong>{v.format?.toUpperCase()}</strong> — {v.filesize ? formatBytes(v.filesize) : '?'}{' '}
               ({v.width}x{v.height})

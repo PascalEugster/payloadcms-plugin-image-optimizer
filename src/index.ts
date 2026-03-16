@@ -44,7 +44,7 @@ export const imageOptimizer =
         if (!collection.hooks.beforeChange) {
           collection.hooks.beforeChange = []
         }
-        collection.hooks.beforeChange.push(createBeforeChangeHook(resolvedConfig))
+        collection.hooks.beforeChange.push(createBeforeChangeHook(resolvedConfig, collectionSlug))
 
         if (!collection.hooks.afterChange) {
           collection.hooks.afterChange = []

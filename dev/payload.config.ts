@@ -47,6 +47,13 @@ const buildConfigWithMemoryDB = async () => {
           staticDir: path.resolve(dirname, 'media'),
         },
       },
+      {
+        slug: 'avatars',
+        fields: [],
+        upload: {
+          staticDir: path.resolve(dirname, 'avatars'),
+        },
+      },
     ],
     db: mongooseAdapter({
       ensureIndexes: true,
@@ -61,6 +68,10 @@ const buildConfigWithMemoryDB = async () => {
       imageOptimizer({
         collections: {
           media: true,
+          avatars: {
+            maxDimensions: { width: 256, height: 256 },
+            formats: [{ format: 'webp', quality: 90 }],
+          },
         },
         formats: [
           { format: 'webp', quality: 80 },

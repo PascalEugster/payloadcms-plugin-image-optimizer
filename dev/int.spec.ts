@@ -34,9 +34,11 @@ afterAll(async () => {
 
 beforeAll(async () => {
   payload = await getPayload({ config })
-  // Ensure media directory exists
+  // Ensure media directories exist
   const mediaDir = path.resolve(dirname, 'media')
   await fs.mkdir(mediaDir, { recursive: true })
+  const avatarsDir = path.resolve(dirname, 'avatars')
+  await fs.mkdir(avatarsDir, { recursive: true })
 })
 
 describe('Image Optimizer Plugin', () => {
@@ -157,6 +159,86 @@ describe('Image Optimizer Plugin', () => {
 
     expect(webpExists).toBe(true)
     expect(avifExists).toBe(true)
+  })
+
+  test('avatars collection should use custom maxDimensions', async () => {
+    const buffer = await createTestImage(800, 600)
+
+    const doc = await payload.create({
+      collection: 'avatars',
+      data: {},
+      file: {
+        data: buffer,
+        mimetype: 'image/jpeg',
+        name: 'test-avatar-resize.jpg',
+        size: buffer.length,
+      },
+    })
+
+    // Verify the saved file was resized within 256x256
+    const savedPath = path.resolve(dirname, 'avatars', doc.filename as string)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    const metadata = await sharp(savedPath).metadata()
+    expect(metadata.width).toBeLessThanOrEqual(256)
+    expect(metadata.height).toBeLessThanOrEqual(256)
+    // 800x600 fit inside 256x256 => 256x192
+    expect(metadata.width).toBe(256)
+    expect(metadata.height).toBe(192)
+  })
+
+  test('avatars collection should only generate webp variant (custom formats)', async () => {
+    const buffer = await createTestImage(400, 300)
+
+    const doc = await payload.create({
+      collection: 'avatars',
+      data: {},
+      file: {
+        data: buffer,
+        mimetype: 'image/jpeg',
+        name: 'test-avatar-formats.jpg',
+        size: buffer.length,
+      },
+    })
+
+    await payload.jobs.run()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const updatedDoc = await payload.findByID({
+      collection: 'avatars',
+      id: doc.id,
+    })
+
+    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
+    expect(updatedDoc.imageOptimizer.variants[0].format).toBe('webp')
+  })
+
+  test('media collection with `true` should use global defaults (both formats)', async () => {
+    const buffer = await createTestImage(400, 300)
+
+    const doc = await payload.create({
+      collection: 'media',
+      data: {},
+      file: {
+        data: buffer,
+        mimetype: 'image/jpeg',
+        name: 'test-global-defaults.jpg',
+        size: buffer.length,
+      },
+    })
+
+    await payload.jobs.run()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const updatedDoc = await payload.findByID({
+      collection: 'media',
+      id: doc.id,
+    })
+
+    expect(updatedDoc.imageOptimizer.variants).toHaveLength(2)
+
+    const formats = updatedDoc.imageOptimizer.variants.map((v: any) => v.format)
+    expect(formats).toContain('webp')
+    expect(formats).toContain('avif')
   })
 
   test('should not process non-image uploads', async () => {

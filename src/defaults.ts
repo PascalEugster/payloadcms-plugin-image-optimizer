@@ -1,4 +1,6 @@
-import type { ImageOptimizerConfig, ResolvedImageOptimizerConfig } from './types.js'
+import type { CollectionSlug } from 'payload'
+
+import type { ImageOptimizerConfig, ResolvedCollectionOptimizerConfig, ResolvedImageOptimizerConfig } from './types.js'
 
 export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimizerConfig => ({
   collections: config.collections,
@@ -11,3 +13,22 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
   stripMetadata: config.stripMetadata ?? true,
 })
+
+export const resolveCollectionConfig = (
+  resolvedConfig: ResolvedImageOptimizerConfig,
+  collectionSlug: string,
+): ResolvedCollectionOptimizerConfig => {
+  const collectionValue = resolvedConfig.collections[collectionSlug as CollectionSlug]
+
+  if (!collectionValue || collectionValue === true) {
+    return {
+      formats: resolvedConfig.formats,
+      maxDimensions: resolvedConfig.maxDimensions,
+    }
+  }
+
+  return {
+    formats: collectionValue.formats ?? resolvedConfig.formats,
+    maxDimensions: collectionValue.maxDimensions ?? resolvedConfig.maxDimensions,
+  }
+}

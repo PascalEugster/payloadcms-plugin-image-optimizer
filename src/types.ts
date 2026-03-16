@@ -21,6 +21,11 @@ export type ImageOptimizerConfig = {
   stripMetadata?: boolean
 }
 
+export type ResolvedCollectionOptimizerConfig = {
+  formats: FormatQuality[]
+  maxDimensions: { width: number; height: number }
+}
+
 export type ResolvedImageOptimizerConfig = Required<
   Pick<ImageOptimizerConfig, 'formats' | 'generateBlurPlaceholder' | 'maxDimensions' | 'stripMetadata'>
 > & {
