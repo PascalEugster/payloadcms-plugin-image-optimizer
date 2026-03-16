@@ -66,7 +66,7 @@ export const imageOptimizer =
           collection.admin.components.beforeListTable = []
         }
         collection.admin.components.beforeListTable.push(
-          'image-optimizer/client#RegenerationButton',
+          '@inoo-ch/payload-image-optimizer/client#RegenerationButton',
         )
       }
     }

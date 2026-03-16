@@ -1,8 +1,26 @@
 {
-  "name": "image-optimizer",
+  "name": "@inoo-ch/payload-image-optimizer",
   "version": "1.0.0",
-  "description": "A blank template to get started with Payload 3.0",
+  "description": "Payload CMS plugin for automatic image optimization — WebP/AVIF conversion, resize, EXIF strip, ThumbHash placeholders, and bulk regeneration",
   "license": "MIT",
+  "keywords": [
+    "payload",
+    "payloadcms",
+    "plugin",
+    "image",
+    "optimization",
+    "webp",
+    "avif",
+    "thumbhash",
+    "sharp",
+    "resize",
+    "compress"
+  ],
+  "homepage": "https://github.com/payloadcms-plugins/image-optimizer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/payloadcms-plugins/image-optimizer"
+  },
   "type": "module",
   "exports": {
     ".": {

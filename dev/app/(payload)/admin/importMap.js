@@ -1,7 +1,7 @@
-import { OptimizationStatus as OptimizationStatus_ad29e6629b339b645ee2cbbac763d435 } from 'image-optimizer/client'
-import { RegenerationButton as RegenerationButton_ad29e6629b339b645ee2cbbac763d435 } from 'image-optimizer/client'
+import { OptimizationStatus as OptimizationStatus_841f288f491e1fefe208477b779cfd1c } from '@inoo-ch/payload-image-optimizer/client'
+import { RegenerationButton as RegenerationButton_841f288f491e1fefe208477b779cfd1c } from '@inoo-ch/payload-image-optimizer/client'
 
 export const importMap = {
-  "image-optimizer/client#OptimizationStatus": OptimizationStatus_ad29e6629b339b645ee2cbbac763d435,
-  "image-optimizer/client#RegenerationButton": RegenerationButton_ad29e6629b339b645ee2cbbac763d435
+  "@inoo-ch/payload-image-optimizer/client#OptimizationStatus": OptimizationStatus_841f288f491e1fefe208477b779cfd1c,
+  "@inoo-ch/payload-image-optimizer/client#RegenerationButton": RegenerationButton_841f288f491e1fefe208477b779cfd1c
 }

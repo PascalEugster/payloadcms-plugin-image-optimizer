@@ -19,13 +19,13 @@
       "@payload-config": [
         "./payload.config.ts"
       ],
-      "image-optimizer": [
+      "@inoo-ch/payload-image-optimizer": [
         "../src/index.ts"
       ],
-      "image-optimizer/client": [
+      "@inoo-ch/payload-image-optimizer/client": [
         "../src/exports/client.ts"
       ],
-      "image-optimizer/rsc": [
+      "@inoo-ch/payload-image-optimizer/rsc": [
         "../src/exports/rsc.ts"
       ]
     },

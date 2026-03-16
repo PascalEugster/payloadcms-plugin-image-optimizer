@@ -3,7 +3,7 @@ import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import path from 'path'
 import { buildConfig } from 'payload'
-import { imageOptimizer } from 'image-optimizer'
+import { imageOptimizer } from '@inoo-ch/payload-image-optimizer'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 

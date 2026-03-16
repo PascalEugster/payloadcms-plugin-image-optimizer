@@ -7,7 +7,7 @@ export const getImageOptimizerField = (): GroupField => ({
     position: 'sidebar',
     readOnly: true,
     components: {
-      Field: 'image-optimizer/client#OptimizationStatus',
+      Field: '@inoo-ch/payload-image-optimizer/client#OptimizationStatus',
     },
   },
   fields: [
