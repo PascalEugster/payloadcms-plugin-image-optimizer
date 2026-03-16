@@ -6,6 +6,8 @@ import { getImageOptimizerField } from './fields/imageOptimizerField.js'
 import { createBeforeChangeHook } from './hooks/beforeChange.js'
 import { createAfterChangeHook } from './hooks/afterChange.js'
 import { createConvertFormatsHandler } from './tasks/convertFormats.js'
+import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js'
+import { createRegenerateHandler, createRegenerateStatusHandler } from './endpoints/regenerate.js'
 
 export type { ImageOptimizerConfig, ImageFormat, FormatQuality, CollectionOptimizerConfig } from './types.js'
 
@@ -52,6 +54,20 @@ export const imageOptimizer =
           collection.hooks.afterChange = []
         }
         collection.hooks.afterChange.push(createAfterChangeHook(resolvedConfig, collectionSlug))
+
+        // Add RegenerationButton to the collection list view
+        if (!collection.admin) {
+          collection.admin = {}
+        }
+        if (!collection.admin.components) {
+          collection.admin.components = {}
+        }
+        if (!collection.admin.components.beforeListTable) {
+          collection.admin.components.beforeListTable = []
+        }
+        collection.admin.components.beforeListTable.push(
+          'image-optimizer/client#RegenerationButton',
+        )
       }
     }
 
@@ -75,6 +91,35 @@ export const imageOptimizer =
       retries: 2,
       handler: createConvertFormatsHandler(resolvedConfig),
     } as any)
+
+    config.jobs!.tasks!.push({
+      slug: 'imageOptimizer_regenerateDocument',
+      inputSchema: [
+        { name: 'collectionSlug', type: 'text', required: true },
+        { name: 'docId', type: 'text', required: true },
+      ],
+      outputSchema: [
+        { name: 'status', type: 'text' },
+        { name: 'reason', type: 'text' },
+      ],
+      retries: 2,
+      handler: createRegenerateDocumentHandler(resolvedConfig),
+    } as any)
+
+    // Register regeneration endpoints
+    if (!config.endpoints) config.endpoints = []
+
+    config.endpoints.push({
+      path: '/image-optimizer/regenerate',
+      method: 'post',
+      handler: createRegenerateHandler(resolvedConfig),
+    })
+
+    config.endpoints.push({
+      path: '/image-optimizer/regenerate',
+      method: 'get',
+      handler: createRegenerateStatusHandler(resolvedConfig),
+    })
 
     return config
   }

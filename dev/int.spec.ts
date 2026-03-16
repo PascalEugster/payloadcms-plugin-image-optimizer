@@ -256,4 +256,100 @@ describe('Image Optimizer Plugin', () => {
 
     expect(doc.imageOptimizer?.status).toBeUndefined()
   })
+
+  test('should regenerate an existing document without imageOptimizer data', async () => {
+    const buffer = await createTestImage(800, 600)
+    const doc = await payload.create({
+      collection: 'media',
+      data: {},
+      file: {
+        data: buffer,
+        mimetype: 'image/jpeg',
+        name: 'test-regen-existing.jpg',
+        size: buffer.length,
+      },
+      context: { imageOptimizer_skip: true },
+    })
+
+    // Verify no optimization data was generated
+    expect(doc.imageOptimizer?.status).toBeUndefined()
+
+    // Queue and run the regeneration task manually
+    await payload.jobs.queue({
+      task: 'imageOptimizer_regenerateDocument',
+      input: {
+        collectionSlug: 'media',
+        docId: String(doc.id),
+      },
+    })
+    await payload.jobs.run()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    // Fetch the document again and verify it now has optimization data
+    const updatedDoc = await payload.findByID({ collection: 'media', id: doc.id })
+    expect(updatedDoc.imageOptimizer.status).toBe('complete')
+    expect(updatedDoc.imageOptimizer.thumbHash).toBeDefined()
+    expect(updatedDoc.imageOptimizer.thumbHash.length).toBeGreaterThan(0)
+    expect(updatedDoc.imageOptimizer.originalSize).toBeGreaterThan(0)
+    expect(updatedDoc.imageOptimizer.optimizedSize).toBeGreaterThan(0)
+    expect(updatedDoc.imageOptimizer.variants).toHaveLength(2)
+  })
+
+  test('should skip non-image documents during regeneration', async () => {
+    const textBuffer = Buffer.from('Hello')
+    const doc = await payload.create({
+      collection: 'media',
+      data: {},
+      file: {
+        data: textBuffer,
+        mimetype: 'text/plain',
+        name: 'test-regen-skip.txt',
+        size: textBuffer.length,
+      },
+      context: { imageOptimizer_skip: true },
+    })
+
+    await payload.jobs.queue({
+      task: 'imageOptimizer_regenerateDocument',
+      input: { collectionSlug: 'media', docId: String(doc.id) },
+    })
+    await payload.jobs.run()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const updatedDoc = await payload.findByID({ collection: 'media', id: doc.id })
+    expect(updatedDoc.imageOptimizer?.status).toBeUndefined()
+  })
+
+  test('should regenerate with per-collection config (avatars)', async () => {
+    const buffer = await createTestImage(800, 600)
+    const doc = await payload.create({
+      collection: 'avatars',
+      data: {},
+      file: {
+        data: buffer,
+        mimetype: 'image/jpeg',
+        name: 'test-regen-avatar.jpg',
+        size: buffer.length,
+      },
+      context: { imageOptimizer_skip: true },
+    })
+
+    await payload.jobs.queue({
+      task: 'imageOptimizer_regenerateDocument',
+      input: { collectionSlug: 'avatars', docId: String(doc.id) },
+    })
+    await payload.jobs.run()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const updatedDoc = await payload.findByID({ collection: 'avatars', id: doc.id })
+    expect(updatedDoc.imageOptimizer.status).toBe('complete')
+    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
+    expect(updatedDoc.imageOptimizer.variants[0].format).toBe('webp')
+
+    // Verify file was resized
+    const savedPath = path.resolve(dirname, 'avatars', updatedDoc.filename as string)
+    const metadata = await sharp(savedPath).metadata()
+    expect(metadata.width).toBeLessThanOrEqual(256)
+    expect(metadata.height).toBeLessThanOrEqual(256)
+  })
 })
