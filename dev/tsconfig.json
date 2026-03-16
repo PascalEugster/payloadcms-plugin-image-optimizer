@@ -1,0 +1,35 @@
+{
+  "extends": "../tsconfig.json",
+  "exclude": [],
+  "include": [
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.mjs",
+    "**/*.cjs",
+    "**/*.ts",
+    "**/*.tsx",
+    "../src/**/*.ts",
+    "../src/**/*.tsx",
+    "next.config.mjs",
+    ".next/types/**/*.ts"
+  ],
+  "compilerOptions": {
+    "baseUrl": "./",
+    "paths": {
+      "@payload-config": [
+        "./payload.config.ts"
+      ],
+      "image-optimizer": [
+        "../src/index.ts"
+      ],
+      "image-optimizer/client": [
+        "../src/exports/client.ts"
+      ],
+      "image-optimizer/rsc": [
+        "../src/exports/rsc.ts"
+      ]
+    },
+    "noEmit": true,
+    "emitDeclarationOnly": false,
+  }
+}
