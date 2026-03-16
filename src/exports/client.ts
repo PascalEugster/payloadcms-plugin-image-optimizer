@@ -1,1 +1,1 @@
-export { BeforeDashboardClient } from '../components/BeforeDashboardClient.js'
+export { OptimizationStatus } from '../components/OptimizationStatus.js'

@@ -1,113 +1,78 @@
-import type { CollectionSlug, Config } from 'payload'
+import type { Config } from 'payload'
 
-import { customEndpointHandler } from './endpoints/customEndpointHandler.js'
+import type { ImageOptimizerConfig } from './types.js'
+import { resolveConfig } from './defaults.js'
+import { getImageOptimizerField } from './fields/imageOptimizerField.js'
+import { createBeforeChangeHook } from './hooks/beforeChange.js'
+import { createAfterChangeHook } from './hooks/afterChange.js'
+import { createConvertFormatsHandler } from './tasks/convertFormats.js'
 
-export type ImageOptimizerConfig = {
-  /**
-   * List of collections to add a custom field
-   */
-  collections?: Partial<Record<CollectionSlug, true>>
-  disabled?: boolean
-}
+export type { ImageOptimizerConfig, ImageFormat, FormatQuality, CollectionOptimizerConfig } from './types.js'
 
 export const imageOptimizer =
   (pluginOptions: ImageOptimizerConfig) =>
   (config: Config): Config => {
+    const resolvedConfig = resolveConfig(pluginOptions)
+
     if (!config.collections) {
       config.collections = []
     }
 
-    config.collections.push({
-      slug: 'plugin-collection',
-      fields: [
-        {
-          name: 'id',
-          type: 'text',
-        },
-      ],
-    })
+    // Inject imageOptimizer fields into targeted upload collections
+    for (const collectionSlug in resolvedConfig.collections) {
+      const collection = config.collections.find((c) => c.slug === collectionSlug)
 
-    if (pluginOptions.collections) {
-      for (const collectionSlug in pluginOptions.collections) {
-        const collection = config.collections.find(
-          (collection) => collection.slug === collectionSlug,
-        )
-
-        if (collection) {
-          collection.fields.push({
-            name: 'addedByPlugin',
-            type: 'text',
-            admin: {
-              position: 'sidebar',
-            },
-          })
-        }
+      if (collection) {
+        collection.fields.push(getImageOptimizerField())
       }
     }
 
-    /**
-     * If the plugin is disabled, we still want to keep added collections/fields so the database schema is consistent which is important for migrations.
-     * If your plugin heavily modifies the database schema, you may want to remove this property.
-     */
-    if (pluginOptions.disabled) {
+    // If disabled, keep fields for schema consistency but skip hooks/tasks
+    if (resolvedConfig.disabled) {
       return config
     }
 
-    if (!config.endpoints) {
-      config.endpoints = []
-    }
+    // Inject hooks into targeted upload collections
+    for (const collectionSlug in resolvedConfig.collections) {
+      const collection = config.collections.find((c) => c.slug === collectionSlug)
 
-    if (!config.admin) {
-      config.admin = {}
-    }
+      if (collection) {
+        if (!collection.hooks) {
+          collection.hooks = {}
+        }
 
-    if (!config.admin.components) {
-      config.admin.components = {}
-    }
+        if (!collection.hooks.beforeChange) {
+          collection.hooks.beforeChange = []
+        }
+        collection.hooks.beforeChange.push(createBeforeChangeHook(resolvedConfig))
 
-    if (!config.admin.components.beforeDashboard) {
-      config.admin.components.beforeDashboard = []
-    }
-
-    config.admin.components.beforeDashboard.push(
-      `image-optimizer/client#BeforeDashboardClient`,
-    )
-    config.admin.components.beforeDashboard.push(
-      `image-optimizer/rsc#BeforeDashboardServer`,
-    )
-
-    config.endpoints.push({
-      handler: customEndpointHandler,
-      method: 'get',
-      path: '/my-plugin-endpoint',
-    })
-
-    const incomingOnInit = config.onInit
-
-    config.onInit = async (payload) => {
-      // Ensure we are executing any existing onInit functions before running our own.
-      if (incomingOnInit) {
-        await incomingOnInit(payload)
-      }
-
-      const { totalDocs } = await payload.count({
-        collection: 'plugin-collection',
-        where: {
-          id: {
-            equals: 'seeded-by-plugin',
-          },
-        },
-      })
-
-      if (totalDocs === 0) {
-        await payload.create({
-          collection: 'plugin-collection',
-          data: {
-            id: 'seeded-by-plugin',
-          },
-        })
+        if (!collection.hooks.afterChange) {
+          collection.hooks.afterChange = []
+        }
+        collection.hooks.afterChange.push(createAfterChangeHook(resolvedConfig, collectionSlug))
       }
     }
+
+    // Register async format conversion job task
+    if (!config.jobs) {
+      config.jobs = { tasks: [] }
+    }
+    if (!config.jobs!.tasks) {
+      config.jobs!.tasks = []
+    }
+
+    config.jobs!.tasks!.push({
+      slug: 'imageOptimizer_convertFormats',
+      inputSchema: [
+        { name: 'collectionSlug', type: 'text', required: true },
+        { name: 'docId', type: 'text', required: true },
+      ],
+      outputSchema: [
+        { name: 'variantsGenerated', type: 'number' },
+      ],
+      retries: 2,
+      handler: createConvertFormatsHandler(resolvedConfig),
+    } as any)
 
     return config
   }

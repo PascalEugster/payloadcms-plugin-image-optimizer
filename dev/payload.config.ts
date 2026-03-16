@@ -60,8 +60,15 @@ const buildConfigWithMemoryDB = async () => {
     plugins: [
       imageOptimizer({
         collections: {
-          posts: true,
+          media: true,
         },
+        formats: [
+          { format: 'webp', quality: 80 },
+          { format: 'avif', quality: 65 },
+        ],
+        maxDimensions: { width: 2560, height: 2560 },
+        stripMetadata: true,
+        generateBlurPlaceholder: true,
       }),
     ],
     secret: process.env.PAYLOAD_SECRET || 'test-secret_key',
