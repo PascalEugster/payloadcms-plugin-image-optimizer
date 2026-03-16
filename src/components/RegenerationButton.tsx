@@ -15,13 +15,14 @@ export const RegenerationButton: React.FC = () => {
   const [queued, setQueued] = useState<number | null>(null)
   const [force, setForce] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [collectionSlug, setCollectionSlug] = useState<string | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Extract collection slug from URL
-  const collectionSlug =
-    typeof window !== 'undefined'
-      ? window.location.pathname.split('/collections/')[1]?.split('/')[0]
-      : null
+  // Extract collection slug from URL after mount to avoid hydration mismatch
+  useEffect(() => {
+    const slug = window.location.pathname.split('/collections/')[1]?.split('/')[0] ?? null
+    setCollectionSlug(slug)
+  }, [])
 
   const pollProgress = useCallback(async () => {
     if (!collectionSlug) return
