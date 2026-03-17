@@ -134,9 +134,10 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
         },
       }
 
-      // Update filename and mimeType when replaceOriginal changed them
+      // Update filename, mimeType, and filesize when replaceOriginal changed them
       if (newFilename !== safeFilename) {
         updateData.filename = newFilename
+        updateData.filesize = mainSize
         updateData.mimeType = newMimeType
       }
 

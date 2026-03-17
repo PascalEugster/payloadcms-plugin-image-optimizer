@@ -7,11 +7,10 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   disabled: config.disabled ?? false,
   formats: config.formats ?? [
     { format: 'webp', quality: 80 },
-    { format: 'avif', quality: 65 },
   ],
   generateThumbHash: config.generateThumbHash ?? true,
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
-  replaceOriginal: config.replaceOriginal ?? false,
+  replaceOriginal: config.replaceOriginal ?? true,
   stripMetadata: config.stripMetadata ?? true,
 })
 

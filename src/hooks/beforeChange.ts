@@ -42,6 +42,7 @@ export const createBeforeChangeHook = (
       context.imageOptimizer_originalFilename = originalFilename
       data.filename = newFilename
       data.mimeType = converted.mimeType
+      data.filesize = finalSize
     }
 
     data.imageOptimizer = {
