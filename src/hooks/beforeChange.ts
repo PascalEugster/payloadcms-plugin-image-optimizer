@@ -67,6 +67,7 @@ export const createBeforeChangeHook = (
       req.file.mimetype = data.mimeType
     }
     context.imageOptimizer_processedBuffer = finalBuffer
+    context.imageOptimizer_hasUpload = true
 
     return data
   }

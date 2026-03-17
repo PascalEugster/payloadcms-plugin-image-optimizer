@@ -28,8 +28,10 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
           id: input.docId,
           data: {
             imageOptimizer: {
+              ...doc.imageOptimizer,
               status: 'complete',
               variants: [],
+              error: null,
             },
           },
           context: { imageOptimizer_skip: true },
@@ -86,8 +88,10 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
         id: input.docId,
         data: {
           imageOptimizer: {
+            ...doc.imageOptimizer,
             status: 'complete',
             variants,
+            error: null,
           },
         },
         context: { imageOptimizer_skip: true },

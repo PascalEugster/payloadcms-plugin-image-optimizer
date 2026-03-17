@@ -14,7 +14,10 @@ export const createAfterChangeHook = (
   return async ({ context, doc, req }) => {
     if (context?.imageOptimizer_skip) return doc
 
-    if (!req.file || !req.file.data || !req.file.mimetype?.startsWith('image/')) return doc
+    // Use context flag from beforeChange instead of checking req.file.data directly.
+    // Cloud storage adapters may consume req.file.data in their own afterChange hook
+    // before ours runs, which would cause this guard to bail out and leave status as 'pending'.
+    if (!context?.imageOptimizer_hasUpload) return doc
 
     const collectionConfig = req.payload.collections[collectionSlug as keyof typeof req.payload.collections].config
     const cloudStorage = isCloudStorage(collectionConfig)
@@ -52,8 +55,10 @@ export const createAfterChangeHook = (
         id: doc.id,
         data: {
           imageOptimizer: {
+            ...doc.imageOptimizer,
             status: 'complete',
             variants: [],
+            error: null,
           },
         },
         context: { imageOptimizer_skip: true },
@@ -70,8 +75,10 @@ export const createAfterChangeHook = (
         id: doc.id,
         data: {
           imageOptimizer: {
+            ...doc.imageOptimizer,
             status: 'complete',
             variants: [],
+            error: null,
           },
         },
         context: { imageOptimizer_skip: true },
