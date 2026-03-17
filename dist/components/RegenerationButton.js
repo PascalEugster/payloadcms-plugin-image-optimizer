@@ -167,7 +167,7 @@ export const RegenerationButton = ()=>{
         };
     }, []);
     if (!collectionSlug) return null;
-    const progressPercent = progress && progress.total > 0 ? Math.round(progress.complete / progress.total * 100) : 0;
+    const progressPercent = progress && progress.total > 0 ? Math.round((progress.complete + progress.errored) / progress.total * 100) : 0;
     const showProgressBar = isRunning && progress || stalled && progress;
     // Stats computations
     const statsPercent = stats && stats.total > 0 ? Math.round(stats.complete / stats.total * 100) : 0;
@@ -234,11 +234,13 @@ export const RegenerationButton = ()=>{
                     fontSize: '13px'
                 },
                 children: [
-                    "Process stalled. ",
-                    progress.pending,
+                    "Processing finished with issues. ",
+                    progress.errored + progress.pending,
                     " image",
-                    progress.pending !== 1 ? 's' : '',
-                    " failed to process."
+                    progress.errored + progress.pending !== 1 ? 's' : '',
+                    " failed",
+                    progress.pending > 0 ? ` (${progress.pending} stuck)` : '',
+                    ". Re-run to retry."
                 ]
             }),
             showProgressBar && /*#__PURE__*/ _jsxs("div", {
@@ -280,33 +282,43 @@ export const RegenerationButton = ()=>{
                             })
                         ]
                     }),
-                    /*#__PURE__*/ _jsx("div", {
+                    /*#__PURE__*/ _jsxs("div", {
                         style: {
                             height: '6px',
                             backgroundColor: '#e5e7eb',
                             borderRadius: '3px',
-                            overflow: 'hidden'
+                            overflow: 'hidden',
+                            display: 'flex'
                         },
-                        children: /*#__PURE__*/ _jsx("div", {
-                            style: {
-                                height: '100%',
-                                width: `${progressPercent}%`,
-                                backgroundColor: stalled ? '#f59e0b' : '#10b981',
-                                borderRadius: '3px',
-                                transition: 'width 0.3s ease'
-                            }
-                        })
+                        children: [
+                            /*#__PURE__*/ _jsx("div", {
+                                style: {
+                                    height: '100%',
+                                    width: `${progress.total > 0 ? Math.round(progress.complete / progress.total * 100) : 0}%`,
+                                    backgroundColor: '#10b981',
+                                    transition: 'width 0.3s ease'
+                                }
+                            }),
+                            progress.errored > 0 && /*#__PURE__*/ _jsx("div", {
+                                style: {
+                                    height: '100%',
+                                    width: `${progress.total > 0 ? Math.round(progress.errored / progress.total * 100) : 0}%`,
+                                    backgroundColor: '#ef4444',
+                                    transition: 'width 0.3s ease'
+                                }
+                            })
+                        ]
                     })
                 ]
             }),
-            !isRunning && !stalled && progress && progress.complete > 0 && queued !== 0 && /*#__PURE__*/ _jsxs("span", {
+            !isRunning && progress && progress.complete > 0 && queued !== 0 && /*#__PURE__*/ _jsxs("span", {
                 style: {
                     fontSize: '13px'
                 },
                 children: [
                     /*#__PURE__*/ _jsxs("span", {
                         style: {
-                            color: '#10b981'
+                            color: progress.errored > 0 || stalled ? '#f59e0b' : '#10b981'
                         },
                         children: [
                             "Done! ",
@@ -316,13 +328,13 @@ export const RegenerationButton = ()=>{
                             " optimized."
                         ]
                     }),
-                    progress.errored > 0 && /*#__PURE__*/ _jsxs("span", {
+                    (progress.errored > 0 || stalled && progress.pending > 0) && /*#__PURE__*/ _jsxs("span", {
                         style: {
                             color: '#ef4444'
                         },
                         children: [
                             ' ',
-                            progress.errored,
+                            progress.errored + (stalled ? progress.pending : 0),
                             " failed."
                         ]
                     })

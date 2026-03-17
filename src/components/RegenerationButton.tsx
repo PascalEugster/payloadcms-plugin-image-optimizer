@@ -177,7 +177,7 @@ export const RegenerationButton: React.FC = () => {
 
   const progressPercent =
     progress && progress.total > 0
-      ? Math.round((progress.complete / progress.total) * 100)
+      ? Math.round(((progress.complete + progress.errored) / progress.total) * 100)
       : 0
 
   const showProgressBar = (isRunning && progress) || (stalled && progress)
@@ -241,7 +241,10 @@ export const RegenerationButton: React.FC = () => {
 
       {stalled && progress && (
         <span style={{ color: '#f59e0b', fontSize: '13px' }}>
-          Process stalled. {progress.pending} image{progress.pending !== 1 ? 's' : ''} failed to process.
+          Processing finished with issues. {progress.errored + progress.pending} image
+          {progress.errored + progress.pending !== 1 ? 's' : ''} failed
+          {progress.pending > 0 ? ` (${progress.pending} stuck)` : ''}.
+          Re-run to retry.
         </span>
       )}
 
@@ -269,29 +272,39 @@ export const RegenerationButton: React.FC = () => {
               backgroundColor: '#e5e7eb',
               borderRadius: '3px',
               overflow: 'hidden',
+              display: 'flex',
             }}
           >
             <div
               style={{
                 height: '100%',
-                width: `${progressPercent}%`,
-                backgroundColor: stalled ? '#f59e0b' : '#10b981',
-                borderRadius: '3px',
+                width: `${progress.total > 0 ? Math.round((progress.complete / progress.total) * 100) : 0}%`,
+                backgroundColor: '#10b981',
                 transition: 'width 0.3s ease',
               }}
             />
+            {progress.errored > 0 && (
+              <div
+                style={{
+                  height: '100%',
+                  width: `${progress.total > 0 ? Math.round((progress.errored / progress.total) * 100) : 0}%`,
+                  backgroundColor: '#ef4444',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            )}
           </div>
         </div>
       )}
 
-      {!isRunning && !stalled && progress && progress.complete > 0 && queued !== 0 && (
+      {!isRunning && progress && progress.complete > 0 && queued !== 0 && (
         <span style={{ fontSize: '13px' }}>
-          <span style={{ color: '#10b981' }}>
+          <span style={{ color: progress.errored > 0 || stalled ? '#f59e0b' : '#10b981' }}>
             Done! {progress.complete}/{progress.total} optimized.
           </span>
-          {progress.errored > 0 && (
+          {(progress.errored > 0 || (stalled && progress.pending > 0)) && (
             <span style={{ color: '#ef4444' }}>
-              {' '}{progress.errored} failed.
+              {' '}{progress.errored + (stalled ? progress.pending : 0)} failed.
             </span>
           )}
         </span>
