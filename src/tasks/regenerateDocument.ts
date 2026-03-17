@@ -6,6 +6,7 @@ import type { CollectionSlug } from 'payload'
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveCollectionConfig } from '../defaults.js'
 import { stripAndResize, generateThumbHash, convertFormat } from '../processing/index.js'
+import { resolveStaticDir } from '../utilities/resolveStaticDir.js'
 
 export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOptimizerConfig) => {
   return async ({ input, req }: { input: { collectionSlug: string; docId: string }; req: any }) => {
@@ -21,14 +22,10 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
       }
 
       const collectionConfig = req.payload.collections[input.collectionSlug as keyof typeof req.payload.collections].config
+      const staticDir = resolveStaticDir(collectionConfig)
 
-      let staticDir: string =
-        typeof collectionConfig.upload === 'object' ? collectionConfig.upload.staticDir || '' : ''
       if (!staticDir) {
         throw new Error(`No staticDir configured for collection "${input.collectionSlug}"`)
-      }
-      if (!path.isAbsolute(staticDir)) {
-        staticDir = path.resolve(process.cwd(), staticDir)
       }
 
       // Sanitize filename to prevent path traversal

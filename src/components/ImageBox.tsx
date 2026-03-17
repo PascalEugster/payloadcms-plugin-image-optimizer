@@ -2,23 +2,8 @@
 
 import React from 'react'
 import NextImage, { type ImageProps } from 'next/image'
+import type { MediaResource } from '../types.js'
 import { getImageOptimizerProps } from '../utilities/getImageOptimizerProps.js'
-
-type ImageOptimizerData = {
-  thumbHash?: string | null
-}
-
-type MediaResource = {
-  url?: string | null
-  alt?: string | null
-  width?: number | null
-  height?: number | null
-  filename?: string | null
-  focalX?: number | null
-  focalY?: number | null
-  imageOptimizer?: ImageOptimizerData | null
-  updatedAt?: string
-}
 
 export interface ImageBoxProps extends Omit<ImageProps, 'src' | 'alt'> {
   media: MediaResource | string
