@@ -43,7 +43,13 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
 
       const perCollectionConfig = resolveCollectionConfig(resolvedConfig, input.collectionSlug)
 
-      for (const format of perCollectionConfig.formats) {
+      // When replaceOriginal is on, the main file is already in the primary format —
+      // skip it and only generate variants for the remaining formats.
+      const formatsToGenerate = perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0
+        ? perCollectionConfig.formats.slice(1)
+        : perCollectionConfig.formats
+
+      for (const format of formatsToGenerate) {
         const result = await convertFormat(fileBuffer, format.format, format.quality)
         const variantFilename = `${path.parse(safeFilename).name}-optimized.${format.format}`
 

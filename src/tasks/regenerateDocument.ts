@@ -61,16 +61,41 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
         resolvedConfig.stripMetadata,
       )
 
-      // Write optimized file back to disk
-      await fs.writeFile(filePath, processed.buffer)
+      let mainBuffer = processed.buffer
+      let mainSize = processed.size
+      let newFilename = safeFilename
+      let newMimeType: string | undefined
+
+      // Step 1b: If replaceOriginal, convert main file to primary format
+      if (perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0) {
+        const primaryFormat = perCollectionConfig.formats[0]
+        const converted = await convertFormat(processed.buffer, primaryFormat.format, primaryFormat.quality)
+        mainBuffer = converted.buffer
+        mainSize = converted.size
+        newFilename = `${path.parse(safeFilename).name}.${primaryFormat.format}`
+        newMimeType = converted.mimeType
+      }
+
+      // Write optimized file to disk
+      const newFilePath = path.join(staticDir, newFilename)
+      await fs.writeFile(newFilePath, mainBuffer)
+
+      // Clean up old file if filename changed
+      if (newFilename !== safeFilename) {
+        await fs.unlink(filePath).catch(() => {})
+      }
 
       // Step 2: Generate ThumbHash
       let thumbHash: string | undefined
       if (resolvedConfig.generateThumbHash) {
-        thumbHash = await generateThumbHash(processed.buffer)
+        thumbHash = await generateThumbHash(mainBuffer)
       }
 
-      // Step 3: Convert to all configured formats
+      // Step 3: Convert to configured formats (skip primary when replaceOriginal)
+      const formatsToGenerate = perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0
+        ? perCollectionConfig.formats.slice(1)
+        : perCollectionConfig.formats
+
       const variants: Array<{
         filename: string
         filesize: number
@@ -81,9 +106,9 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
         width: number
       }> = []
 
-      for (const format of perCollectionConfig.formats) {
-        const result = await convertFormat(processed.buffer, format.format, format.quality)
-        const variantFilename = `${path.parse(safeFilename).name}-optimized.${format.format}`
+      for (const format of formatsToGenerate) {
+        const result = await convertFormat(mainBuffer, format.format, format.quality)
+        const variantFilename = `${path.parse(newFilename).name}-optimized.${format.format}`
         await fs.writeFile(path.join(staticDir, variantFilename), result.buffer)
 
         variants.push({
@@ -98,19 +123,27 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
       }
 
       // Step 4: Update the document with all optimization data
+      const updateData: Record<string, any> = {
+        imageOptimizer: {
+          originalSize,
+          optimizedSize: mainSize,
+          status: 'complete',
+          thumbHash,
+          variants,
+          error: null,
+        },
+      }
+
+      // Update filename and mimeType when replaceOriginal changed them
+      if (newFilename !== safeFilename) {
+        updateData.filename = newFilename
+        updateData.mimeType = newMimeType
+      }
+
       await req.payload.update({
         collection: input.collectionSlug as CollectionSlug,
         id: input.docId,
-        data: {
-          imageOptimizer: {
-            originalSize,
-            optimizedSize: processed.size,
-            status: 'complete',
-            thumbHash,
-            variants,
-            error: null,
-          },
-        },
+        data: updateData,
         context: { imageOptimizer_skip: true },
       })
 

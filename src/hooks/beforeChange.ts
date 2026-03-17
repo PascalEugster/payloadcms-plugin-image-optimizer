@@ -1,8 +1,9 @@
+import path from 'path'
 import type { CollectionBeforeChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveCollectionConfig } from '../defaults.js'
-import { generateThumbHash, stripAndResize } from '../processing/index.js'
+import { convertFormat, generateThumbHash, stripAndResize } from '../processing/index.js'
 
 export const createBeforeChangeHook = (
   resolvedConfig: ResolvedImageOptimizerConfig,
@@ -24,19 +25,38 @@ export const createBeforeChangeHook = (
       resolvedConfig.stripMetadata,
     )
 
+    let finalBuffer = processed.buffer
+    let finalSize = processed.size
+
+    if (perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0) {
+      // Convert to primary format (first in the formats array)
+      const primaryFormat = perCollectionConfig.formats[0]
+      const converted = await convertFormat(processed.buffer, primaryFormat.format, primaryFormat.quality)
+
+      finalBuffer = converted.buffer
+      finalSize = converted.size
+
+      // Update filename and mimeType so Payload stores the correct metadata
+      const originalFilename = data.filename || req.file.name || ''
+      const newFilename = `${path.parse(originalFilename).name}.${primaryFormat.format}`
+      context.imageOptimizer_originalFilename = originalFilename
+      data.filename = newFilename
+      data.mimeType = converted.mimeType
+    }
+
     data.imageOptimizer = {
       originalSize,
-      optimizedSize: processed.size,
+      optimizedSize: finalSize,
       status: 'pending',
     }
 
     if (resolvedConfig.generateThumbHash) {
-      data.imageOptimizer.thumbHash = await generateThumbHash(processed.buffer)
+      data.imageOptimizer.thumbHash = await generateThumbHash(finalBuffer)
     }
 
     // Store processed buffer in context for afterChange to write to disk
     // (Payload 3.0 does not use modified req.file.data for the disk write)
-    context.imageOptimizer_processedBuffer = processed.buffer
+    context.imageOptimizer_processedBuffer = finalBuffer
 
     return data
   }

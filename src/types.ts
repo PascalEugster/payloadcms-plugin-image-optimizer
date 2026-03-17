@@ -10,6 +10,7 @@ export type FormatQuality = {
 export type CollectionOptimizerConfig = {
   formats?: FormatQuality[]
   maxDimensions?: { width: number; height: number }
+  replaceOriginal?: boolean
 }
 
 export type ImageOptimizerConfig = {
@@ -18,12 +19,14 @@ export type ImageOptimizerConfig = {
   formats?: FormatQuality[]
   generateThumbHash?: boolean
   maxDimensions?: { width: number; height: number }
+  replaceOriginal?: boolean
   stripMetadata?: boolean
 }
 
 export type ResolvedCollectionOptimizerConfig = {
   formats: FormatQuality[]
   maxDimensions: { width: number; height: number }
+  replaceOriginal: boolean
 }
 
 export type ResolvedImageOptimizerConfig = Required<
@@ -31,4 +34,5 @@ export type ResolvedImageOptimizerConfig = Required<
 > & {
   collections: ImageOptimizerConfig['collections']
   disabled: boolean
+  replaceOriginal: boolean
 }

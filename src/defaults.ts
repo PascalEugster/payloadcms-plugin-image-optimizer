@@ -11,6 +11,7 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   ],
   generateThumbHash: config.generateThumbHash ?? true,
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
+  replaceOriginal: config.replaceOriginal ?? false,
   stripMetadata: config.stripMetadata ?? true,
 })
 
@@ -24,11 +25,13 @@ export const resolveCollectionConfig = (
     return {
       formats: resolvedConfig.formats,
       maxDimensions: resolvedConfig.maxDimensions,
+      replaceOriginal: resolvedConfig.replaceOriginal,
     }
   }
 
   return {
     formats: collectionValue.formats ?? resolvedConfig.formats,
     maxDimensions: collectionValue.maxDimensions ?? resolvedConfig.maxDimensions,
+    replaceOriginal: collectionValue.replaceOriginal ?? resolvedConfig.replaceOriginal,
   }
 }

@@ -3,6 +3,7 @@ import path from 'path'
 import type { CollectionAfterChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
+import { resolveCollectionConfig } from '../defaults.js'
 
 export const createAfterChangeHook = (
   resolvedConfig: ResolvedImageOptimizerConfig,
@@ -13,27 +14,52 @@ export const createAfterChangeHook = (
 
     if (!req.file || !req.file.data || !req.file.mimetype?.startsWith('image/')) return doc
 
-    // Overwrite the file on disk with the processed (stripped/resized) buffer
+    const collectionConfig = req.payload.collections[collectionSlug as keyof typeof req.payload.collections].config
+    let staticDir: string =
+      typeof collectionConfig.upload === 'object' ? collectionConfig.upload.staticDir || '' : ''
+
+    if (staticDir && !path.isAbsolute(staticDir)) {
+      staticDir = path.resolve(process.cwd(), staticDir)
+    }
+
+    const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug)
+
+    // Overwrite the file on disk with the processed (stripped/resized/converted) buffer
     // Payload 3.0 writes the original buffer to disk; we replace it here
     const processedBuffer = context.imageOptimizer_processedBuffer as Buffer | undefined
-    if (processedBuffer && doc.filename) {
-      const collectionConfig = req.payload.collections[collectionSlug as keyof typeof req.payload.collections].config
-      let staticDir: string =
-        typeof collectionConfig.upload === 'object' ? collectionConfig.upload.staticDir || '' : ''
+    if (processedBuffer && doc.filename && staticDir) {
+      const safeFilename = path.basename(doc.filename as string)
+      const filePath = path.join(staticDir, safeFilename)
+      await fs.writeFile(filePath, processedBuffer)
 
-      if (staticDir && !path.isAbsolute(staticDir)) {
-        staticDir = path.resolve(process.cwd(), staticDir)
-      }
-
-      if (staticDir) {
-        // Sanitize filename to prevent path traversal
-        const safeFilename = path.basename(doc.filename as string)
-        const filePath = path.join(staticDir, safeFilename)
-        await fs.writeFile(filePath, processedBuffer)
+      // If replaceOriginal changed the filename, clean up the old file Payload wrote
+      const originalFilename = context.imageOptimizer_originalFilename as string | undefined
+      if (originalFilename && originalFilename !== safeFilename) {
+        const oldFilePath = path.join(staticDir, path.basename(originalFilename))
+        await fs.unlink(oldFilePath).catch(() => {
+          // Old file may not exist if Payload used the new filename
+        })
       }
     }
 
-    // Queue async format conversion job
+    // When replaceOriginal is on and only one format is configured, the main file
+    // is already converted — skip the async job and mark complete immediately.
+    if (perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length <= 1) {
+      await req.payload.update({
+        collection: collectionSlug,
+        id: doc.id,
+        data: {
+          imageOptimizer: {
+            status: 'complete',
+            variants: [],
+          },
+        },
+        context: { imageOptimizer_skip: true },
+      })
+      return doc
+    }
+
+    // Queue async format conversion job for remaining variants
     await req.payload.jobs.queue({
       task: 'imageOptimizer_convertFormats',
       input: {
