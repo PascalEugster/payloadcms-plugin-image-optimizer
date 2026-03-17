@@ -90,7 +90,7 @@ imageOptimizer({
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `collections` | `Record<string, true \| CollectionConfig>` | *required* | Collections to optimize. Use `true` for defaults or an object for overrides. |
-| `formats` | `FormatQuality[]` | `[{ format: 'webp', quality: 80 }, { format: 'avif', quality: 65 }]` | Output formats and quality (1-100). |
+| `formats` | `FormatQuality[]` | `[{ format: 'webp', quality: 80 }]` | Output formats and quality (1-100). |
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions. Images are resized to fit within these bounds. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholders for instant image previews. |
 | `stripMetadata` | `boolean` | `true` | Remove EXIF and other metadata from images. |
@@ -211,6 +211,23 @@ GET /api/image-optimizer/regenerate?collection=media
 **Response:** `{ "collectionSlug": "media", "total": 42, "complete": 30, "errored": 1, "pending": 11 }`
 
 Both endpoints require an authenticated user.
+
+## AI Agent Integration
+
+Full technical documentation for AI coding agents is available in [`AGENT_DOCS.md`](./AGENT_DOCS.md). It covers all configuration options, field schemas, endpoints, client utilities, background jobs, and context flags in a single reference file.
+
+### Prompt for AI Agents
+
+Copy-paste this instruction to your AI coding agent to have it autonomously integrate the plugin:
+
+> Install `@inoo-ch/payload-image-optimizer` and integrate it into this Payload CMS project. Read `node_modules/@inoo-ch/payload-image-optimizer/AGENT_DOCS.md` for the full API reference. Based on the project's existing upload collections and frontend, decide on your own:
+>
+> 1. Which upload collections should be optimized and with what settings
+> 2. Whether to use `replaceOriginal` or keep originals alongside variants
+> 3. Where to add `<ImageBox>` or `getImageOptimizerProps()` in the frontend for ThumbHash blur placeholders and focal point support
+> 4. Whether any existing image rendering code should use the optimized variants
+>
+> Use the zero-config default (`collections: { <slug>: true }`) unless the project has specific requirements that call for custom settings.
 
 ## Contributing
 
