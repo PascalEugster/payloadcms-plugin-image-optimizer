@@ -4,6 +4,7 @@ import type { CollectionAfterChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveCollectionConfig } from '../defaults.js'
+import { resolveStaticDir } from '../utilities/resolveStaticDir.js'
 
 export const createAfterChangeHook = (
   resolvedConfig: ResolvedImageOptimizerConfig,
@@ -15,12 +16,7 @@ export const createAfterChangeHook = (
     if (!req.file || !req.file.data || !req.file.mimetype?.startsWith('image/')) return doc
 
     const collectionConfig = req.payload.collections[collectionSlug as keyof typeof req.payload.collections].config
-    let staticDir: string =
-      typeof collectionConfig.upload === 'object' ? collectionConfig.upload.staticDir || '' : ''
-
-    if (staticDir && !path.isAbsolute(staticDir)) {
-      staticDir = path.resolve(process.cwd(), staticDir)
-    }
+    const staticDir = resolveStaticDir(collectionConfig)
 
     const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug)
 

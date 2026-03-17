@@ -1,14 +1,6 @@
 import { thumbHashToDataURL } from 'thumbhash'
 
-type ImageOptimizerData = {
-  thumbHash?: string | null
-}
-
-type ResourceWithOptimizer = {
-  imageOptimizer?: ImageOptimizerData | null
-  focalX?: number | null
-  focalY?: number | null
-}
+import type { MediaResource } from '../types.js'
 
 export type ImageOptimizerProps = {
   placeholder: 'blur' | 'empty'
@@ -33,7 +25,7 @@ export type ImageOptimizerProps = {
  * <NextImage {...existingProps} {...optimizerProps} />
  * ```
  */
-export function getImageOptimizerProps(resource: ResourceWithOptimizer | null | undefined): ImageOptimizerProps {
+export function getImageOptimizerProps(resource: MediaResource | null | undefined): ImageOptimizerProps {
   if (!resource) {
     return { placeholder: 'empty', style: { objectPosition: 'center' } }
   }

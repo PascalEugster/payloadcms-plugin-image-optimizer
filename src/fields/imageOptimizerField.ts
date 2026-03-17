@@ -1,6 +1,66 @@
-import type { GroupField } from 'payload'
+import type { Field, GroupField } from 'payload'
 
-export const getImageOptimizerField = (): GroupField => ({
+import type { FieldsOverride } from '../types.js'
+
+export const defaultImageOptimizerFields: Field[] = [
+  {
+    name: 'thumbHash',
+    type: 'text',
+  },
+  {
+    name: 'originalSize',
+    type: 'number',
+  },
+  {
+    name: 'optimizedSize',
+    type: 'number',
+  },
+  {
+    name: 'status',
+    type: 'select',
+    options: ['pending', 'processing', 'complete', 'error'],
+  },
+  {
+    name: 'error',
+    type: 'text',
+  },
+  {
+    name: 'variants',
+    type: 'array',
+    fields: [
+      {
+        name: 'format',
+        type: 'text',
+      },
+      {
+        name: 'filename',
+        type: 'text',
+      },
+      {
+        name: 'filesize',
+        type: 'number',
+      },
+      {
+        name: 'width',
+        type: 'number',
+      },
+      {
+        name: 'height',
+        type: 'number',
+      },
+      {
+        name: 'mimeType',
+        type: 'text',
+      },
+      {
+        name: 'url',
+        type: 'text',
+      },
+    ],
+  },
+]
+
+export const getImageOptimizerField = (fieldsOverride?: FieldsOverride): GroupField => ({
   name: 'imageOptimizer',
   type: 'group',
   admin: {
@@ -10,61 +70,7 @@ export const getImageOptimizerField = (): GroupField => ({
       Field: '@inoo-ch/payload-image-optimizer/client#OptimizationStatus',
     },
   },
-  fields: [
-    {
-      name: 'thumbHash',
-      type: 'text',
-    },
-    {
-      name: 'originalSize',
-      type: 'number',
-    },
-    {
-      name: 'optimizedSize',
-      type: 'number',
-    },
-    {
-      name: 'status',
-      type: 'select',
-      options: ['pending', 'processing', 'complete', 'error'],
-    },
-    {
-      name: 'error',
-      type: 'text',
-    },
-    {
-      name: 'variants',
-      type: 'array',
-      fields: [
-        {
-          name: 'format',
-          type: 'text',
-        },
-        {
-          name: 'filename',
-          type: 'text',
-        },
-        {
-          name: 'filesize',
-          type: 'number',
-        },
-        {
-          name: 'width',
-          type: 'number',
-        },
-        {
-          name: 'height',
-          type: 'number',
-        },
-        {
-          name: 'mimeType',
-          type: 'text',
-        },
-        {
-          name: 'url',
-          type: 'text',
-        },
-      ],
-    },
-  ],
+  fields: fieldsOverride
+    ? fieldsOverride({ defaultFields: defaultImageOptimizerFields })
+    : defaultImageOptimizerFields,
 })

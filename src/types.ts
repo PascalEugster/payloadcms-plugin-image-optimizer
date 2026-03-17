@@ -1,4 +1,4 @@
-import type { CollectionSlug } from 'payload'
+import type { CollectionSlug, Field } from 'payload'
 
 export type ImageFormat = 'webp' | 'avif'
 
@@ -13,9 +13,12 @@ export type CollectionOptimizerConfig = {
   replaceOriginal?: boolean
 }
 
+export type FieldsOverride = (args: { defaultFields: Field[] }) => Field[]
+
 export type ImageOptimizerConfig = {
   collections: Partial<Record<CollectionSlug, true | CollectionOptimizerConfig>>
   disabled?: boolean
+  fieldsOverride?: FieldsOverride
   formats?: FormatQuality[]
   generateThumbHash?: boolean
   maxDimensions?: { width: number; height: number }
@@ -35,4 +38,20 @@ export type ResolvedImageOptimizerConfig = Required<
   collections: ImageOptimizerConfig['collections']
   disabled: boolean
   replaceOriginal: boolean
+}
+
+export type ImageOptimizerData = {
+  thumbHash?: string | null
+}
+
+export type MediaResource = {
+  url?: string | null
+  alt?: string | null
+  width?: number | null
+  height?: number | null
+  filename?: string | null
+  focalX?: number | null
+  focalY?: number | null
+  imageOptimizer?: ImageOptimizerData | null
+  updatedAt?: string
 }
