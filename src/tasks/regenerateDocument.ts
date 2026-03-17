@@ -7,6 +7,7 @@ import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveCollectionConfig } from '../defaults.js'
 import { stripAndResize, generateThumbHash, convertFormat } from '../processing/index.js'
 import { resolveStaticDir } from '../utilities/resolveStaticDir.js'
+import { fetchFileBuffer, isCloudStorage } from '../utilities/storage.js'
 
 export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOptimizerConfig) => {
   return async ({ input, req }: { input: { collectionSlug: string; docId: string }; req: any }) => {
@@ -22,34 +23,14 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
       }
 
       const collectionConfig = req.payload.collections[input.collectionSlug as keyof typeof req.payload.collections].config
-      const staticDir = resolveStaticDir(collectionConfig)
+      const cloudStorage = isCloudStorage(collectionConfig)
 
-      if (!staticDir) {
-        throw new Error(`No staticDir configured for collection "${input.collectionSlug}"`)
-      }
+      const fileBuffer = await fetchFileBuffer(doc, collectionConfig)
+      const originalSize = fileBuffer.length
+      const perCollectionConfig = resolveCollectionConfig(resolvedConfig, input.collectionSlug)
 
       // Sanitize filename to prevent path traversal
       const safeFilename = path.basename(doc.filename)
-      const filePath = path.join(staticDir, safeFilename)
-
-      let fileBuffer: Buffer
-      try {
-        fileBuffer = await fs.readFile(filePath)
-      } catch {
-        // If file not on disk, try fetching from URL
-        if (doc.url) {
-          const url = doc.url.startsWith('http')
-            ? doc.url
-            : `${process.env.NEXT_PUBLIC_SERVER_URL || ''}${doc.url}`
-          const response = await fetch(url)
-          fileBuffer = Buffer.from(await response.arrayBuffer())
-        } else {
-          throw new Error(`File not found: ${filePath}`)
-        }
-      }
-
-      const originalSize = fileBuffer.length
-      const perCollectionConfig = resolveCollectionConfig(resolvedConfig, input.collectionSlug)
 
       // Step 1: Strip metadata + resize
       const processed = await stripAndResize(
@@ -73,26 +54,13 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
         newMimeType = converted.mimeType
       }
 
-      // Write optimized file to disk
-      const newFilePath = path.join(staticDir, newFilename)
-      await fs.writeFile(newFilePath, mainBuffer)
-
-      // Clean up old file if filename changed
-      if (newFilename !== safeFilename) {
-        await fs.unlink(filePath).catch(() => {})
-      }
-
       // Step 2: Generate ThumbHash
       let thumbHash: string | undefined
       if (resolvedConfig.generateThumbHash) {
         thumbHash = await generateThumbHash(mainBuffer)
       }
 
-      // Step 3: Convert to configured formats (skip primary when replaceOriginal)
-      const formatsToGenerate = perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0
-        ? perCollectionConfig.formats.slice(1)
-        : perCollectionConfig.formats
-
+      // Step 3: Store the optimized file
       const variants: Array<{
         filename: string
         filesize: number
@@ -103,47 +71,96 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
         width: number
       }> = []
 
-      for (const format of formatsToGenerate) {
-        const result = await convertFormat(mainBuffer, format.format, format.quality)
-        const variantFilename = `${path.parse(newFilename).name}-optimized.${format.format}`
-        await fs.writeFile(path.join(staticDir, variantFilename), result.buffer)
+      if (cloudStorage) {
+        // Cloud storage: re-upload the optimized file via Payload's update API.
+        // This triggers the cloud adapter's afterChange hook which uploads to cloud.
+        const updateData: Record<string, any> = {
+          imageOptimizer: {
+            originalSize,
+            optimizedSize: mainSize,
+            status: 'complete',
+            thumbHash,
+            variants: [],
+            error: null,
+          },
+        }
 
-        variants.push({
-          format: format.format,
-          filename: variantFilename,
-          filesize: result.size,
-          width: result.width,
-          height: result.height,
-          mimeType: result.mimeType,
-          url: `/api/${input.collectionSlug}/file/${variantFilename}`,
+        if (newFilename !== safeFilename) {
+          updateData.filename = newFilename
+          updateData.filesize = mainSize
+          updateData.mimeType = newMimeType
+        }
+
+        await req.payload.update({
+          collection: input.collectionSlug as CollectionSlug,
+          id: input.docId,
+          data: updateData,
+          file: {
+            data: mainBuffer,
+            mimetype: newMimeType || doc.mimeType,
+            name: newFilename,
+            size: mainSize,
+          },
+          context: { imageOptimizer_skip: true },
+        })
+      } else {
+        // Local storage: write files to disk
+        const staticDir = resolveStaticDir(collectionConfig)
+        const newFilePath = path.join(staticDir, newFilename)
+        await fs.writeFile(newFilePath, mainBuffer)
+
+        // Clean up old file if filename changed
+        if (newFilename !== safeFilename) {
+          const oldFilePath = path.join(staticDir, safeFilename)
+          await fs.unlink(oldFilePath).catch(() => {})
+        }
+
+        // Generate variant files (local storage only)
+        const formatsToGenerate = perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0
+          ? perCollectionConfig.formats.slice(1)
+          : perCollectionConfig.formats
+
+        for (const format of formatsToGenerate) {
+          const result = await convertFormat(mainBuffer, format.format, format.quality)
+          const variantFilename = `${path.parse(newFilename).name}-optimized.${format.format}`
+          await fs.writeFile(path.join(staticDir, variantFilename), result.buffer)
+
+          variants.push({
+            format: format.format,
+            filename: variantFilename,
+            filesize: result.size,
+            width: result.width,
+            height: result.height,
+            mimeType: result.mimeType,
+            url: `/api/${input.collectionSlug}/file/${variantFilename}`,
+          })
+        }
+
+        // Update the document with optimization data
+        const updateData: Record<string, any> = {
+          imageOptimizer: {
+            originalSize,
+            optimizedSize: mainSize,
+            status: 'complete',
+            thumbHash,
+            variants,
+            error: null,
+          },
+        }
+
+        if (newFilename !== safeFilename) {
+          updateData.filename = newFilename
+          updateData.filesize = mainSize
+          updateData.mimeType = newMimeType
+        }
+
+        await req.payload.update({
+          collection: input.collectionSlug as CollectionSlug,
+          id: input.docId,
+          data: updateData,
+          context: { imageOptimizer_skip: true },
         })
       }
-
-      // Step 4: Update the document with all optimization data
-      const updateData: Record<string, any> = {
-        imageOptimizer: {
-          originalSize,
-          optimizedSize: mainSize,
-          status: 'complete',
-          thumbHash,
-          variants,
-          error: null,
-        },
-      }
-
-      // Update filename, mimeType, and filesize when replaceOriginal changed them
-      if (newFilename !== safeFilename) {
-        updateData.filename = newFilename
-        updateData.filesize = mainSize
-        updateData.mimeType = newMimeType
-      }
-
-      await req.payload.update({
-        collection: input.collectionSlug as CollectionSlug,
-        id: input.docId,
-        data: updateData,
-        context: { imageOptimizer_skip: true },
-      })
 
       return { output: { status: 'complete' } }
     } catch (err) {

@@ -55,8 +55,17 @@ export const createBeforeChangeHook = (
       data.imageOptimizer.thumbHash = await generateThumbHash(finalBuffer)
     }
 
-    // Store processed buffer in context for afterChange to write to disk
-    // (Payload 3.0 does not use modified req.file.data for the disk write)
+    // Write processed buffer back to req.file so cloud storage adapters
+    // (which read req.file in their afterChange hook) upload the optimized version.
+    // Payload's own uploadFiles step does NOT re-read req.file.data for its local
+    // disk write, so we also store the buffer in context for our afterChange hook
+    // to overwrite the local file when local storage is enabled.
+    req.file.data = finalBuffer
+    req.file.size = finalSize
+    if (perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0) {
+      req.file.name = data.filename
+      req.file.mimetype = data.mimeType
+    }
     context.imageOptimizer_processedBuffer = finalBuffer
 
     return data

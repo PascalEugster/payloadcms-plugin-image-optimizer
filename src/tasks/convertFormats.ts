@@ -7,6 +7,7 @@ import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveCollectionConfig } from '../defaults.js'
 import { convertFormat } from '../processing/index.js'
 import { resolveStaticDir } from '../utilities/resolveStaticDir.js'
+import { fetchFileBuffer, isCloudStorage } from '../utilities/storage.js'
 
 export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimizerConfig) => {
   return async ({ input, req }: { input: { collectionSlug: string; docId: string }; req: any }) => {
@@ -17,16 +18,31 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
       })
 
       const collectionConfig = req.payload.collections[input.collectionSlug as keyof typeof req.payload.collections].config
-      const staticDir = resolveStaticDir(collectionConfig)
+      const cloudStorage = isCloudStorage(collectionConfig)
 
+      // Cloud storage: variant files cannot be uploaded without direct adapter access.
+      // Mark as complete — CDN-level image optimization handles format conversion.
+      if (cloudStorage) {
+        await req.payload.update({
+          collection: input.collectionSlug as CollectionSlug,
+          id: input.docId,
+          data: {
+            imageOptimizer: {
+              status: 'complete',
+              variants: [],
+            },
+          },
+          context: { imageOptimizer_skip: true },
+        })
+        return { output: { variantsGenerated: 0 } }
+      }
+
+      const staticDir = resolveStaticDir(collectionConfig)
       if (!staticDir) {
         throw new Error(`No staticDir configured for collection "${input.collectionSlug}"`)
       }
 
-      // Sanitize filename to prevent path traversal
-      const safeFilename = path.basename(doc.filename)
-      const filePath = path.join(staticDir, safeFilename)
-      const fileBuffer = await fs.readFile(filePath)
+      const fileBuffer = await fetchFileBuffer(doc, collectionConfig)
 
       const variants: Array<{
         filename: string
@@ -45,6 +61,8 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
       const formatsToGenerate = perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0
         ? perCollectionConfig.formats.slice(1)
         : perCollectionConfig.formats
+
+      const safeFilename = path.basename(doc.filename)
 
       for (const format of formatsToGenerate) {
         const result = await convertFormat(fileBuffer, format.format, format.quality)
