@@ -9,19 +9,48 @@ type RegenerationProgress = {
   pending: number
 }
 
+const STALL_THRESHOLD = 5
+
 export const RegenerationButton: React.FC = () => {
   const [isRunning, setIsRunning] = useState(false)
   const [progress, setProgress] = useState<RegenerationProgress | null>(null)
   const [queued, setQueued] = useState<number | null>(null)
   const [force, setForce] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [stalled, setStalled] = useState(false)
   const [collectionSlug, setCollectionSlug] = useState<string | null>(null)
+  const [stats, setStats] = useState<RegenerationProgress | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const stallRef = useRef({ lastProcessed: 0, stallCount: 0 })
+  const prevIsRunningRef = useRef(false)
 
   // Extract collection slug from URL after mount to avoid hydration mismatch
   useEffect(() => {
     const slug = window.location.pathname.split('/collections/')[1]?.split('/')[0] ?? null
     setCollectionSlug(slug)
+  }, [])
+
+  // Fetch optimization stats (independent of regeneration)
+  const fetchStats = useCallback(async () => {
+    if (!collectionSlug) return
+    try {
+      const res = await fetch(
+        `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
+      )
+      if (res.ok) {
+        const data: RegenerationProgress = await res.json()
+        setStats(data)
+      }
+    } catch {
+      // ignore stats fetch errors
+    }
+  }, [collectionSlug])
+
+  const stopPolling = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
   }, [])
 
   const pollProgress = useCallback(async () => {
@@ -31,28 +60,83 @@ export const RegenerationButton: React.FC = () => {
         `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
       )
       if (res.ok) {
-        const data = await res.json()
+        const data: RegenerationProgress = await res.json()
         setProgress(data)
+
         // Stop polling when no more pending
         if (data.pending <= 0) {
           setIsRunning(false)
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current)
-            intervalRef.current = null
-          }
+          stopPolling()
+          return
+        }
+
+        // Stall detection
+        const processed = data.complete + data.errored
+        if (processed === stallRef.current.lastProcessed) {
+          stallRef.current.stallCount += 1
+        } else {
+          stallRef.current.stallCount = 0
+          stallRef.current.lastProcessed = processed
+        }
+
+        if (stallRef.current.stallCount >= STALL_THRESHOLD) {
+          stopPolling()
+          setIsRunning(false)
+          setStalled(true)
         }
       }
     } catch {
       // ignore polling errors
     }
-  }, [collectionSlug])
+  }, [collectionSlug, stopPolling])
+
+  // On mount (once collectionSlug is known), check if there's an ongoing job and resume polling
+  useEffect(() => {
+    if (!collectionSlug) return
+    let cancelled = false
+    const checkOngoing = async () => {
+      try {
+        const res = await fetch(
+          `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
+        )
+        if (!res.ok || cancelled) return
+        const data: RegenerationProgress = await res.json()
+        // Always store stats on mount
+        setStats(data)
+        if (data.pending > 0) {
+          setProgress(data)
+          setIsRunning(true)
+          setStalled(false)
+          setQueued(null)
+          stallRef.current = { lastProcessed: data.complete + data.errored, stallCount: 0 }
+          intervalRef.current = setInterval(pollProgress, 2000)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    checkOngoing()
+    return () => {
+      cancelled = true
+    }
+  }, [collectionSlug, pollProgress])
+
+  // Refresh stats when regeneration finishes (isRunning transitions from true to false)
+  useEffect(() => {
+    if (prevIsRunningRef.current && !isRunning) {
+      fetchStats()
+    }
+    prevIsRunningRef.current = isRunning
+  }, [isRunning, fetchStats])
 
   const handleRegenerate = async () => {
     if (!collectionSlug) return
     setError(null)
+    setStalled(false)
     setIsRunning(true)
     setQueued(null)
     setProgress(null)
+    stallRef.current = { lastProcessed: 0, stallCount: 0 }
 
     try {
       const res = await fetch('/api/image-optimizer/regenerate', {
@@ -95,6 +179,15 @@ export const RegenerationButton: React.FC = () => {
     progress && progress.total > 0
       ? Math.round((progress.complete / progress.total) * 100)
       : 0
+
+  const showProgressBar = (isRunning && progress) || (stalled && progress)
+
+  // Stats computations
+  const statsPercent =
+    stats && stats.total > 0
+      ? Math.round((stats.complete / stats.total) * 100)
+      : 0
+  const allOptimized = stats && stats.total > 0 && stats.complete === stats.total
 
   return (
     <div
@@ -140,13 +233,19 @@ export const RegenerationButton: React.FC = () => {
         <span style={{ color: '#ef4444', fontSize: '13px' }}>{error}</span>
       )}
 
-      {queued === 0 && !isRunning && (
+      {queued === 0 && !isRunning && !stalled && (
         <span style={{ color: '#10b981', fontSize: '13px' }}>
           All images already optimized.
         </span>
       )}
 
-      {isRunning && progress && (
+      {stalled && progress && (
+        <span style={{ color: '#f59e0b', fontSize: '13px' }}>
+          Process stalled. {progress.pending} image{progress.pending !== 1 ? 's' : ''} failed to process.
+        </span>
+      )}
+
+      {showProgressBar && (
         <div style={{ flex: 1, minWidth: '200px' }}>
           <div
             style={{
@@ -176,7 +275,7 @@ export const RegenerationButton: React.FC = () => {
               style={{
                 height: '100%',
                 width: `${progressPercent}%`,
-                backgroundColor: '#10b981',
+                backgroundColor: stalled ? '#f59e0b' : '#10b981',
                 borderRadius: '3px',
                 transition: 'width 0.3s ease',
               }}
@@ -185,10 +284,72 @@ export const RegenerationButton: React.FC = () => {
         </div>
       )}
 
-      {!isRunning && progress && progress.complete > 0 && queued !== 0 && (
-        <span style={{ color: '#10b981', fontSize: '13px' }}>
-          Done! {progress.complete}/{progress.total} optimized.
+      {!isRunning && !stalled && progress && progress.complete > 0 && queued !== 0 && (
+        <span style={{ fontSize: '13px' }}>
+          <span style={{ color: '#10b981' }}>
+            Done! {progress.complete}/{progress.total} optimized.
+          </span>
+          {progress.errored > 0 && (
+            <span style={{ color: '#ef4444' }}>
+              {' '}{progress.errored} failed.
+            </span>
+          )}
         </span>
+      )}
+
+      {/* Persistent optimization stats — always visible when not actively regenerating */}
+      {!isRunning && stats && stats.total > 0 && (
+        <div
+          style={{
+            marginLeft: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: '4px',
+            minWidth: '180px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+            {allOptimized ? (
+              <span style={{ color: '#10b981' }}>
+                &#10003; All {stats.total} images optimized
+              </span>
+            ) : (
+              <>
+                <span style={{ color: '#6b7280' }}>
+                  {stats.complete}/{stats.total} optimized
+                </span>
+                {stats.errored > 0 && (
+                  <>
+                    <span style={{ color: '#d1d5db' }}>&middot;</span>
+                    <span style={{ color: '#ef4444' }}>{stats.errored} errors</span>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+          {!allOptimized && (
+            <div
+              style={{
+                width: '100%',
+                height: '3px',
+                backgroundColor: '#e5e7eb',
+                borderRadius: '2px',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${statsPercent}%`,
+                  backgroundColor: stats.errored > 0 ? '#f59e0b' : '#10b981',
+                  borderRadius: '2px',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
