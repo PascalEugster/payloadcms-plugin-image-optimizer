@@ -1,6 +1,6 @@
 import fs from 'fs/promises'
 import path from 'path'
-import type { CollectionAfterChangeHook } from 'payload'
+import type { CollectionAfterChangeHook, CollectionSlug } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveCollectionConfig } from '../defaults.js'
@@ -51,7 +51,7 @@ export const createAfterChangeHook = (
     // is already converted — skip the async job and mark complete immediately.
     if (perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length <= 1) {
       await req.payload.update({
-        collection: collectionSlug,
+        collection: collectionSlug as CollectionSlug,
         id: doc.id,
         data: {
           imageOptimizer: {
@@ -71,7 +71,7 @@ export const createAfterChangeHook = (
     // serve alternative formats on the fly.
     if (cloudStorage) {
       await req.payload.update({
-        collection: collectionSlug,
+        collection: collectionSlug as CollectionSlug,
         id: doc.id,
         data: {
           imageOptimizer: {
