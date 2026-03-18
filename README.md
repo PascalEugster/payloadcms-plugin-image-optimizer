@@ -128,6 +128,32 @@ collections: {
 
 All format conversion runs as async background jobs, so uploads return immediately.
 
+## How It Differs from Payload's Default Image Handling
+
+Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and can resize images and generate sizes on upload. This plugin **does not double-process your images** — it intercepts the raw upload in a `beforeChange` hook *before* Payload's own sharp pipeline runs, and writes the optimized buffer back to `req.file.data`. When Payload's built-in `uploadFiles` step kicks in to generate your configured sizes, it works from the already-optimized file, not the raw original.
+
+### Comparison
+
+| Capability | Payload Default | With This Plugin |
+|---|---|---|
+| Resize to max dimensions | Manual via `imageSizes` config | Automatic — configure once globally or per-collection |
+| WebP/AVIF conversion | Requires custom hooks | Built-in, zero-config |
+| EXIF metadata stripping | Not built-in | Automatic (configurable) |
+| Blur hash placeholders | Requires custom hooks | ThumbHash generated automatically |
+| Optimization status & savings | Not available | Admin sidebar panel per image |
+| Bulk re-process existing images | Not available | One-click regeneration with progress tracking |
+| Next.js `<Image>` with blur placeholder | Manual wiring | Drop-in `<ImageBox>` component |
+| Per-collection format/quality overrides | N/A | Supported |
+
+### CPU & Resource Impact
+
+- **Single-format mode** (e.g. WebP only with `replaceOriginal: true`) adds virtually zero overhead compared to Payload's default sharp processing — the plugin replaces the sharp pass rather than adding a second one.
+- **Additional format variants** (e.g. both WebP and AVIF) run as background jobs after upload — this is the one area where you'll see extra CPU usage vs vanilla Payload.
+- **ThumbHash generation** processes a 100×100px thumbnail — negligible impact.
+- **Bulk regeneration** processes images sequentially, not all at once, so it won't spike your server.
+
+If you're on a resource-constrained server, use single-format mode and you'll be at roughly the same CPU cost as stock Payload.
+
 ## Admin UI
 
 The plugin adds an **Optimization Status** panel to the document sidebar showing:
