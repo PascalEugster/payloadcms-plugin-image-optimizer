@@ -1,5 +1,5 @@
 import type { PayloadHandler } from 'payload'
-import type { CollectionSlug } from 'payload'
+import type { CollectionSlug, Where } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 
@@ -25,16 +25,20 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
     }
 
     // Find all image documents in the collection
-    const where: any = {
-      mimeType: { contains: 'image/' },
-    }
     // Unless force=true, skip already-processed docs
-    if (!body.force) {
-      where.or = [
-        { 'imageOptimizer.status': { not_equals: 'complete' } },
-        { 'imageOptimizer.status': { exists: false } },
-      ]
-    }
+    const where: Where = body.force
+      ? { mimeType: { contains: 'image/' } }
+      : {
+          and: [
+            { mimeType: { contains: 'image/' } },
+            {
+              or: [
+                { 'imageOptimizer.status': { not_equals: 'complete' } },
+                { 'imageOptimizer.status': { exists: false } },
+              ],
+            },
+          ],
+        }
 
     let queued = 0
     let page = 1
@@ -65,9 +69,11 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
       page++
     }
 
+    req.payload.logger.info(`Image optimizer: queued ${queued} images from '${collectionSlug}' for regeneration`)
+
     // Fire the job runner (non-blocking)
     if (queued > 0) {
-      req.payload.jobs.run().catch((err: unknown) => {
+      req.payload.jobs.run({ limit: queued }).catch((err: unknown) => {
         req.payload.logger.error({ err }, 'Regeneration job runner failed')
       })
     }

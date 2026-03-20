@@ -20,6 +20,7 @@ export const RegenerationButton: React.FC = () => {
   const [stalled, setStalled] = useState(false)
   const [collectionSlug, setCollectionSlug] = useState<string | null>(null)
   const [stats, setStats] = useState<RegenerationProgress | null>(null)
+  const [confirming, setConfirming] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const stallRef = useRef({ lastProcessed: 0, stallCount: 0 })
   const prevIsRunningRef = useRef(false)
@@ -129,8 +130,23 @@ export const RegenerationButton: React.FC = () => {
     prevIsRunningRef.current = isRunning
   }, [isRunning, fetchStats])
 
-  const handleRegenerate = async () => {
+  // Phase 1: Show confirmation with counts
+  const handlePreflight = async () => {
     if (!collectionSlug) return
+    setError(null)
+    // Refresh stats to get the latest counts before confirming
+    await fetchStats()
+    setConfirming(true)
+  }
+
+  const handleCancel = () => {
+    setConfirming(false)
+  }
+
+  // Phase 2: Actually start regeneration (after user confirms)
+  const handleConfirm = async () => {
+    if (!collectionSlug) return
+    setConfirming(false)
     setError(null)
     setStalled(false)
     setIsRunning(true)
@@ -200,40 +216,90 @@ export const RegenerationButton: React.FC = () => {
         flexWrap: 'wrap',
       }}
     >
-      <button
-        onClick={handleRegenerate}
-        disabled={isRunning}
-        style={{
-          backgroundColor: isRunning ? '#9ca3af' : '#4f46e5',
-          color: '#fff',
-          border: 'none',
-          borderRadius: '6px',
-          padding: '8px 16px',
-          fontSize: '14px',
-          fontWeight: 500,
-          cursor: isRunning ? 'not-allowed' : 'pointer',
-        }}
-      >
-        {isRunning ? 'Regenerating...' : 'Regenerate Images'}
-      </button>
-
-      <label
-        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-      >
-        <input
-          type="checkbox"
-          checked={force}
-          onChange={(e) => setForce(e.target.checked)}
+      {!confirming && (
+        <button
+          onClick={handlePreflight}
           disabled={isRunning}
-        />
-        Force re-process all
-      </label>
+          style={{
+            backgroundColor: isRunning ? '#9ca3af' : '#4f46e5',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '6px',
+            padding: '8px 16px',
+            fontSize: '14px',
+            fontWeight: 500,
+            cursor: isRunning ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {isRunning ? 'Processing all images...' : 'Regenerate All Images'}
+        </button>
+      )}
+
+      {confirming && stats && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '13px', color: '#374151' }}>
+            {force
+              ? `Re-process all ${stats.total} images across the entire collection?`
+              : `Regenerate ${stats.pending} unoptimized image${stats.pending !== 1 ? 's' : ''} across the entire collection?`}
+          </span>
+          <button
+            onClick={handleConfirm}
+            style={{
+              backgroundColor: '#4f46e5',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 14px',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Confirm
+          </button>
+          <button
+            onClick={handleCancel}
+            style={{
+              backgroundColor: 'transparent',
+              color: '#6b7280',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              padding: '6px 14px',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {!confirming && (
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+        >
+          <input
+            type="checkbox"
+            checked={force}
+            onChange={(e) => setForce(e.target.checked)}
+            disabled={isRunning}
+          />
+          Force re-process all
+        </label>
+      )}
 
       {error && (
         <span style={{ color: '#ef4444', fontSize: '13px' }}>{error}</span>
       )}
 
-      {queued === 0 && !isRunning && !stalled && (
+      {queued !== null && queued > 0 && isRunning && !confirming && (
+        <span style={{ color: '#4f46e5', fontSize: '13px' }}>
+          Queued {queued} image{queued !== 1 ? 's' : ''} for processing across the entire collection
+        </span>
+      )}
+
+      {queued === 0 && !isRunning && !stalled && !confirming && (
         <span style={{ color: '#10b981', fontSize: '13px' }}>
           All images already optimized.
         </span>
@@ -297,10 +363,10 @@ export const RegenerationButton: React.FC = () => {
         </div>
       )}
 
-      {!isRunning && progress && progress.complete > 0 && queued !== 0 && (
+      {!isRunning && progress && progress.complete > 0 && queued !== 0 && !confirming && (
         <span style={{ fontSize: '13px' }}>
           <span style={{ color: progress.errored > 0 || stalled ? '#f59e0b' : '#10b981' }}>
-            Done! {progress.complete}/{progress.total} optimized.
+            Done! {progress.complete}/{progress.total} optimized (across entire collection).
           </span>
           {(progress.errored > 0 || (stalled && progress.pending > 0)) && (
             <span style={{ color: '#ef4444' }}>
