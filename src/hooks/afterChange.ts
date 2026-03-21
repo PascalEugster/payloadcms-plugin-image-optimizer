@@ -1,9 +1,8 @@
 import fs from 'fs/promises'
 import path from 'path'
-import type { CollectionAfterChangeHook, CollectionSlug } from 'payload'
+import type { CollectionAfterChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
-import { resolveCollectionConfig } from '../defaults.js'
 import { resolveStaticDir } from '../utilities/resolveStaticDir.js'
 import { isCloudStorage } from '../utilities/storage.js'
 
@@ -45,44 +44,11 @@ export const createAfterChangeHook = (
       }
     }
 
-    const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug)
-
-    // When replaceOriginal is on and only one format is configured, the main file
-    // is already converted — skip the async job and mark complete immediately.
-    if (perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length <= 1) {
-      await req.payload.update({
-        collection: collectionSlug as CollectionSlug,
-        id: doc.id,
-        data: {
-          imageOptimizer: {
-            ...doc.imageOptimizer,
-            status: 'complete',
-            variants: [],
-            error: null,
-          },
-        },
-        context: { imageOptimizer_skip: true },
-      })
-      return doc
-    }
-
-    // With cloud storage, variant files cannot be written — skip the async job
-    // and mark complete. CDN-level image optimization (e.g. Next.js Image) can
-    // serve alternative formats on the fly.
-    if (cloudStorage) {
-      await req.payload.update({
-        collection: collectionSlug as CollectionSlug,
-        id: doc.id,
-        data: {
-          imageOptimizer: {
-            ...doc.imageOptimizer,
-            status: 'complete',
-            variants: [],
-            error: null,
-          },
-        },
-        context: { imageOptimizer_skip: true },
-      })
+    // When status was already resolved in beforeChange (cloud storage, or
+    // replaceOriginal with a single format), no async job or update is needed.
+    // This avoids a separate update() call that fails with 404 on MongoDB due to
+    // transaction isolation when cloud storage adapters are involved.
+    if (context?.imageOptimizer_statusResolved) {
       return doc
     }
 
