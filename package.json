@@ -16,10 +16,13 @@
     "resize",
     "compress"
   ],
-  "homepage": "https://github.com/payloadcms-plugins/image-optimizer",
+  "homepage": "https://github.com/PascalEugster/payloadcms-plugin-image-optimizer",
   "repository": {
     "type": "git",
-    "url": "https://github.com/payloadcms-plugins/image-optimizer"
+    "url": "https://github.com/PascalEugster/payloadcms-plugin-image-optimizer"
+  },
+  "bugs": {
+    "url": "https://github.com/PascalEugster/payloadcms-plugin-image-optimizer/issues"
   },
   "type": "module",
   "exports": {

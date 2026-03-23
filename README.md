@@ -1,5 +1,9 @@
 # @inoo-ch/payload-image-optimizer
 
+[![npm version](https://img.shields.io/npm/v/@inoo-ch/payload-image-optimizer)](https://www.npmjs.com/package/@inoo-ch/payload-image-optimizer)
+[![npm downloads](https://img.shields.io/npm/dm/@inoo-ch/payload-image-optimizer)](https://www.npmjs.com/package/@inoo-ch/payload-image-optimizer)
+[![GitHub](https://img.shields.io/github/license/PascalEugster/payloadcms-plugin-image-optimizer)](https://github.com/PascalEugster/payloadcms-plugin-image-optimizer)
+
 A [Payload CMS](https://payloadcms.com) plugin for automatic image optimization. Converts uploads to WebP/AVIF, resizes to configurable limits, strips EXIF metadata, generates [ThumbHash](https://evanw.github.io/thumbhash/) blur placeholders, and provides bulk regeneration from the admin panel.
 
 Built and maintained by [inoo.ch](https://inoo.ch) — a Swiss digital agency crafting modern web experiences.
@@ -259,7 +263,7 @@ Copy-paste this instruction to your AI coding agent to have it autonomously inte
 
 This plugin is open source and we welcome community involvement:
 
-- **Issues** — Found a bug or have a feature request? [Open an issue](https://github.com/payloadcms-plugins/image-optimizer/issues).
+- **Issues** — Found a bug or have a feature request? [Open an issue](https://github.com/PascalEugster/payloadcms-plugin-image-optimizer/issues).
 - **Pull Requests** — PRs are welcome! Please open an issue first to discuss larger changes.
 
 All changes are reviewed and merged by the package maintainer at [inoo.ch](https://inoo.ch).
