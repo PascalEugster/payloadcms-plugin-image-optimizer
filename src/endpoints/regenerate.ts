@@ -78,7 +78,7 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
       const runPromise = req.payload.jobs.run({ limit: queued }).catch((err: unknown) => {
         req.payload.logger.error({ err }, 'Regeneration job runner failed')
       })
-      waitUntil(runPromise)
+      waitUntil(runPromise, req)
     }
 
     return Response.json({ queued, collectionSlug })
