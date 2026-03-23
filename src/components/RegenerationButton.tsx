@@ -9,7 +9,10 @@ type RegenerationProgress = {
   pending: number
 }
 
-const STALL_THRESHOLD = 5
+const POLL_INTERVAL_MS = 2000
+// With sequential processing each image takes ~4-5s, so no progress for 30s
+// (15 polls) strongly suggests a real stall rather than slow processing.
+const STALL_THRESHOLD = 15
 
 export const RegenerationButton: React.FC = () => {
   const [isRunning, setIsRunning] = useState(false)
@@ -54,6 +57,15 @@ export const RegenerationButton: React.FC = () => {
     }
   }, [])
 
+  const startPolling = useCallback(
+    (pollFn: () => void) => {
+      // Prevent duplicate intervals
+      stopPolling()
+      intervalRef.current = setInterval(pollFn, POLL_INTERVAL_MS)
+    },
+    [stopPolling],
+  )
+
   const pollProgress = useCallback(async () => {
     if (!collectionSlug) return
     try {
@@ -67,23 +79,25 @@ export const RegenerationButton: React.FC = () => {
         // Stop polling when no more pending
         if (data.pending <= 0) {
           setIsRunning(false)
+          setStalled(false)
           stopPolling()
           return
         }
 
-        // Stall detection
+        // Stall detection — warn but keep polling so we detect when jobs resume
         const processed = data.complete + data.errored
         if (processed === stallRef.current.lastProcessed) {
           stallRef.current.stallCount += 1
         } else {
           stallRef.current.stallCount = 0
           stallRef.current.lastProcessed = processed
+          // Clear stall warning when progress resumes
+          setStalled(false)
         }
 
         if (stallRef.current.stallCount >= STALL_THRESHOLD) {
-          stopPolling()
-          setIsRunning(false)
           setStalled(true)
+          // Keep polling — jobs may still be running server-side
         }
       }
     } catch {
@@ -110,7 +124,7 @@ export const RegenerationButton: React.FC = () => {
           setStalled(false)
           setQueued(null)
           stallRef.current = { lastProcessed: data.complete + data.errored, stallCount: 0 }
-          intervalRef.current = setInterval(pollProgress, 2000)
+          startPolling(pollProgress)
         }
       } catch {
         // ignore
@@ -119,8 +133,10 @@ export const RegenerationButton: React.FC = () => {
     checkOngoing()
     return () => {
       cancelled = true
+      // Clear interval on effect cleanup to prevent duplicate intervals
+      stopPolling()
     }
-  }, [collectionSlug, pollProgress])
+  }, [collectionSlug, pollProgress, startPolling, stopPolling])
 
   // Refresh stats when regeneration finishes (isRunning transitions from true to false)
   useEffect(() => {
@@ -175,7 +191,7 @@ export const RegenerationButton: React.FC = () => {
       }
 
       // Start polling
-      intervalRef.current = setInterval(pollProgress, 2000)
+      startPolling(pollProgress)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setIsRunning(false)
@@ -184,10 +200,8 @@ export const RegenerationButton: React.FC = () => {
 
   // Cleanup interval on unmount
   useEffect(() => {
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [])
+    return () => stopPolling()
+  }, [stopPolling])
 
   if (!collectionSlug) return null
 
@@ -307,10 +321,8 @@ export const RegenerationButton: React.FC = () => {
 
       {stalled && progress && (
         <span style={{ color: '#f59e0b', fontSize: '13px' }}>
-          Processing finished with issues. {progress.errored + progress.pending} image
-          {progress.errored + progress.pending !== 1 ? 's' : ''} failed
-          {progress.pending > 0 ? ` (${progress.pending} stuck)` : ''}.
-          Re-run to retry.
+          Processing appears slow — {progress.pending} image{progress.pending !== 1 ? 's' : ''} still pending.
+          Jobs may still be running server-side.
         </span>
       )}
 
@@ -363,21 +375,21 @@ export const RegenerationButton: React.FC = () => {
         </div>
       )}
 
-      {!isRunning && progress && progress.complete > 0 && queued !== 0 && !confirming && (
+      {!isRunning && !stalled && progress && progress.complete > 0 && queued !== 0 && !confirming && (
         <span style={{ fontSize: '13px' }}>
-          <span style={{ color: progress.errored > 0 || stalled ? '#f59e0b' : '#10b981' }}>
+          <span style={{ color: progress.errored > 0 ? '#f59e0b' : '#10b981' }}>
             Done! {progress.complete}/{progress.total} optimized (across entire collection).
           </span>
-          {(progress.errored > 0 || (stalled && progress.pending > 0)) && (
+          {progress.errored > 0 && (
             <span style={{ color: '#ef4444' }}>
-              {' '}{progress.errored + (stalled ? progress.pending : 0)} failed.
+              {' '}{progress.errored} failed.
             </span>
           )}
         </span>
       )}
 
       {/* Persistent optimization stats — always visible when not actively regenerating */}
-      {!isRunning && stats && stats.total > 0 && (
+      {!isRunning && !stalled && stats && stats.total > 0 && (
         <div
           style={{
             marginLeft: 'auto',
