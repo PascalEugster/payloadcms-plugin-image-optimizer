@@ -105,38 +105,30 @@ export const RegenerationButton: React.FC = () => {
     }
   }, [collectionSlug, stopPolling])
 
-  // On mount (once collectionSlug is known), check if there's an ongoing job and resume polling
+  // Fetch stats once on mount (for the counter display). Do NOT auto-start
+  // polling — "pending" just means "not yet optimized", not "jobs are running".
+  // Polling only begins when the user explicitly triggers regeneration.
   useEffect(() => {
     if (!collectionSlug) return
     let cancelled = false
-    const checkOngoing = async () => {
+    const loadStats = async () => {
       try {
         const res = await fetch(
           `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
         )
         if (!res.ok || cancelled) return
         const data: RegenerationProgress = await res.json()
-        // Always store stats on mount
         setStats(data)
-        if (data.pending > 0) {
-          setProgress(data)
-          setIsRunning(true)
-          setStalled(false)
-          setQueued(null)
-          stallRef.current = { lastProcessed: data.complete + data.errored, stallCount: 0 }
-          startPolling(pollProgress)
-        }
       } catch {
         // ignore
       }
     }
-    checkOngoing()
+    loadStats()
     return () => {
       cancelled = true
-      // Clear interval on effect cleanup to prevent duplicate intervals
       stopPolling()
     }
-  }, [collectionSlug, pollProgress, startPolling, stopPolling])
+  }, [collectionSlug, stopPolling])
 
   // Refresh stats when regeneration finishes (isRunning transitions from true to false)
   useEffect(() => {
