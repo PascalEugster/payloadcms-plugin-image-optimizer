@@ -13,6 +13,7 @@ const POLL_INTERVAL_MS = 2000
 // With sequential processing each image takes ~4-5s, so no progress for 30s
 // (15 polls) strongly suggests a real stall rather than slow processing.
 const STALL_THRESHOLD = 15
+const SESSION_KEY = 'imageOptimizer_running'
 
 export const RegenerationButton: React.FC = () => {
   const [isRunning, setIsRunning] = useState(false)
@@ -81,6 +82,7 @@ export const RegenerationButton: React.FC = () => {
           setIsRunning(false)
           setStalled(false)
           stopPolling()
+          sessionStorage.removeItem(SESSION_KEY)
           return
         }
 
@@ -105,9 +107,9 @@ export const RegenerationButton: React.FC = () => {
     }
   }, [collectionSlug, stopPolling])
 
-  // Fetch stats once on mount (for the counter display). Do NOT auto-start
-  // polling — "pending" just means "not yet optimized", not "jobs are running".
-  // Polling only begins when the user explicitly triggers regeneration.
+  // On mount: fetch stats for the counter display. If the user previously
+  // triggered regeneration (sessionStorage flag) and there are still pending
+  // images, resume polling so the UI reconnects after page navigation.
   useEffect(() => {
     if (!collectionSlug) return
     let cancelled = false
@@ -119,6 +121,19 @@ export const RegenerationButton: React.FC = () => {
         if (!res.ok || cancelled) return
         const data: RegenerationProgress = await res.json()
         setStats(data)
+
+        // Resume polling only if the user triggered regeneration in this session
+        const wasRunning = sessionStorage.getItem(SESSION_KEY) === collectionSlug
+        if (wasRunning && data.pending > 0) {
+          setProgress(data)
+          setIsRunning(true)
+          setStalled(false)
+          stallRef.current = { lastProcessed: data.complete + data.errored, stallCount: 0 }
+          startPolling(pollProgress)
+        } else if (wasRunning && data.pending <= 0) {
+          // Jobs finished while we were away — clear the flag
+          sessionStorage.removeItem(SESSION_KEY)
+        }
       } catch {
         // ignore
       }
@@ -128,7 +143,7 @@ export const RegenerationButton: React.FC = () => {
       cancelled = true
       stopPolling()
     }
-  }, [collectionSlug, stopPolling])
+  }, [collectionSlug, pollProgress, startPolling, stopPolling])
 
   // Refresh stats when regeneration finishes (isRunning transitions from true to false)
   useEffect(() => {
@@ -182,6 +197,8 @@ export const RegenerationButton: React.FC = () => {
         return
       }
 
+      // Persist running state so we can resume after page navigation
+      sessionStorage.setItem(SESSION_KEY, collectionSlug)
       // Start polling
       startPolling(pollProgress)
     } catch (err) {
