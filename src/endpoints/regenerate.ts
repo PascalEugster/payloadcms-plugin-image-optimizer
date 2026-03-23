@@ -75,7 +75,7 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
     // Fire the job runner — use waitUntil to keep the serverless function alive
     // after the response is sent, so jobs actually complete on Vercel/serverless.
     if (queued > 0) {
-      const runPromise = req.payload.jobs.run({ limit: queued }).catch((err: unknown) => {
+      const runPromise = req.payload.jobs.run({ limit: queued, sequential: true }).catch((err: unknown) => {
         req.payload.logger.error({ err }, 'Regeneration job runner failed')
       })
       waitUntil(runPromise, req)

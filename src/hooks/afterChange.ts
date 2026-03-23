@@ -62,7 +62,7 @@ export const createAfterChangeHook = (
       },
     })
 
-    const runPromise = req.payload.jobs.run().catch((err: unknown) => {
+    const runPromise = req.payload.jobs.run({ sequential: true }).catch((err: unknown) => {
       req.payload.logger.error({ err }, 'Image optimizer job runner failed')
     })
     waitUntil(runPromise, req)
