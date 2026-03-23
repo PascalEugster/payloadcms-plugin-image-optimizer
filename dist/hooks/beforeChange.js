@@ -1,6 +1,7 @@
 import path from 'path';
 import { resolveCollectionConfig } from '../defaults.js';
 import { convertFormat, generateThumbHash, stripAndResize } from '../processing/index.js';
+import { isCloudStorage } from '../utilities/storage.js';
 export const createBeforeChangeHook = (resolvedConfig, collectionSlug)=>{
     return async ({ context, data, req })=>{
         if (context?.imageOptimizer_skip) return data;
@@ -25,11 +26,23 @@ export const createBeforeChangeHook = (resolvedConfig, collectionSlug)=>{
             data.mimeType = converted.mimeType;
             data.filesize = finalSize;
         }
+        // Determine if async work (variant generation job) is needed after create.
+        // If not, set status to 'complete' now so afterChange doesn't need a separate
+        // update() call — which fails with 404 on MongoDB due to transaction isolation
+        // when cloud storage adapters are involved.
+        const collectionConfig = req.payload.collections[collectionSlug].config;
+        const cloudStorage = isCloudStorage(collectionConfig);
+        const needsAsyncJob = !cloudStorage && perCollectionConfig.formats.length > 0 && !(perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length <= 1);
         data.imageOptimizer = {
             originalSize,
             optimizedSize: finalSize,
-            status: 'pending'
+            status: needsAsyncJob ? 'pending' : 'complete',
+            variants: needsAsyncJob ? undefined : [],
+            error: null
         };
+        if (!needsAsyncJob) {
+            context.imageOptimizer_statusResolved = true;
+        }
         if (resolvedConfig.generateThumbHash) {
             data.imageOptimizer.thumbHash = await generateThumbHash(finalBuffer);
         }

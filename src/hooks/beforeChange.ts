@@ -52,7 +52,7 @@ export const createBeforeChangeHook = (
     // when cloud storage adapters are involved.
     const collectionConfig = req.payload.collections[collectionSlug as keyof typeof req.payload.collections].config
     const cloudStorage = isCloudStorage(collectionConfig)
-    const needsAsyncJob = !cloudStorage && !(perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length <= 1)
+    const needsAsyncJob = !cloudStorage && perCollectionConfig.formats.length > 0 && !(perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length <= 1)
 
     data.imageOptimizer = {
       originalSize,

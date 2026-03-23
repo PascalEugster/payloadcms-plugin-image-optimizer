@@ -27,7 +27,12 @@ import { resolveStaticDir } from './resolveStaticDir.js';
     // Fetch from URL (works for cloud storage and as fallback for local)
     if (doc.url) {
         const url = doc.url.startsWith('http') ? doc.url : `${process.env.NEXT_PUBLIC_SERVER_URL || ''}${doc.url}`;
-        const response = await fetch(url);
+        if (!url.startsWith('http')) {
+            throw new Error(`Cannot fetch file "${doc.filename}": URL "${doc.url}" is relative and NEXT_PUBLIC_SERVER_URL is not set`);
+        }
+        const response = await fetch(url, {
+            signal: AbortSignal.timeout(30_000)
+        });
         if (!response.ok) {
             throw new Error(`Failed to fetch file from ${url}: ${response.status} ${response.statusText}`);
         }

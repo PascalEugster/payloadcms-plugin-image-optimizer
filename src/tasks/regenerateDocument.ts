@@ -180,7 +180,7 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
         })
       } catch (updateErr) {
         req.payload.logger.error(
-          { err: updateErr },
+          { err: updateErr, docId: input.docId, collectionSlug: input.collectionSlug },
           'Failed to persist error status for image optimizer regeneration',
         )
       }

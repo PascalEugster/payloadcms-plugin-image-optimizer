@@ -1,8 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { resolveCollectionConfig } from '../defaults.js';
 import { resolveStaticDir } from '../utilities/resolveStaticDir.js';
 import { isCloudStorage } from '../utilities/storage.js';
+import { waitUntil } from '../utilities/waitUntil.js';
 export const createAfterChangeHook = (resolvedConfig, collectionSlug)=>{
     return async ({ context, doc, req })=>{
         if (context?.imageOptimizer_skip) return doc;
@@ -33,46 +33,11 @@ export const createAfterChangeHook = (resolvedConfig, collectionSlug)=>{
                 }
             }
         }
-        const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug);
-        // When replaceOriginal is on and only one format is configured, the main file
-        // is already converted — skip the async job and mark complete immediately.
-        if (perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length <= 1) {
-            await req.payload.update({
-                collection: collectionSlug,
-                id: doc.id,
-                data: {
-                    imageOptimizer: {
-                        ...doc.imageOptimizer,
-                        status: 'complete',
-                        variants: [],
-                        error: null
-                    }
-                },
-                context: {
-                    imageOptimizer_skip: true
-                }
-            });
-            return doc;
-        }
-        // With cloud storage, variant files cannot be written — skip the async job
-        // and mark complete. CDN-level image optimization (e.g. Next.js Image) can
-        // serve alternative formats on the fly.
-        if (cloudStorage) {
-            await req.payload.update({
-                collection: collectionSlug,
-                id: doc.id,
-                data: {
-                    imageOptimizer: {
-                        ...doc.imageOptimizer,
-                        status: 'complete',
-                        variants: [],
-                        error: null
-                    }
-                },
-                context: {
-                    imageOptimizer_skip: true
-                }
-            });
+        // When status was already resolved in beforeChange (cloud storage, or
+        // replaceOriginal with a single format), no async job or update is needed.
+        // This avoids a separate update() call that fails with 404 on MongoDB due to
+        // transaction isolation when cloud storage adapters are involved.
+        if (context?.imageOptimizer_statusResolved) {
             return doc;
         }
         // Queue async format conversion job for remaining variants (local storage only)
@@ -83,11 +48,12 @@ export const createAfterChangeHook = (resolvedConfig, collectionSlug)=>{
                 docId: String(doc.id)
             }
         });
-        req.payload.jobs.run().catch((err)=>{
+        const runPromise = req.payload.jobs.run().catch((err)=>{
             req.payload.logger.error({
                 err
             }, 'Image optimizer job runner failed');
         });
+        waitUntil(runPromise);
         return doc;
     };
 };

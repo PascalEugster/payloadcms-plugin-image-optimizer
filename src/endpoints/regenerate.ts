@@ -2,6 +2,7 @@ import type { PayloadHandler } from 'payload'
 import type { CollectionSlug, Where } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
+import { waitUntil } from '../utilities/waitUntil.js'
 
 export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerConfig) => {
   const handler: PayloadHandler = async (req) => {
@@ -71,11 +72,13 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
 
     req.payload.logger.info(`Image optimizer: queued ${queued} images from '${collectionSlug}' for regeneration`)
 
-    // Fire the job runner (non-blocking)
+    // Fire the job runner — use waitUntil to keep the serverless function alive
+    // after the response is sent, so jobs actually complete on Vercel/serverless.
     if (queued > 0) {
-      req.payload.jobs.run({ limit: queued }).catch((err: unknown) => {
+      const runPromise = req.payload.jobs.run({ limit: queued }).catch((err: unknown) => {
         req.payload.logger.error({ err }, 'Regeneration job runner failed')
       })
+      waitUntil(runPromise)
     }
 
     return Response.json({ queued, collectionSlug })

@@ -100,7 +100,9 @@ export const createConvertFormatsHandler = (resolvedConfig)=>{
                 });
             } catch (updateErr) {
                 req.payload.logger.error({
-                    err: updateErr
+                    err: updateErr,
+                    docId: input.docId,
+                    collectionSlug: input.collectionSlug
                 }, 'Failed to persist error status for image optimizer');
             }
             throw err;

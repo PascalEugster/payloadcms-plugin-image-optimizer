@@ -1,3 +1,4 @@
+import { waitUntil } from '../utilities/waitUntil.js';
 export const createRegenerateHandler = (resolvedConfig)=>{
     const handler = async (req)=>{
         if (!req.user) {
@@ -22,26 +23,34 @@ export const createRegenerateHandler = (resolvedConfig)=>{
             });
         }
         // Find all image documents in the collection
-        const where = {
+        // Unless force=true, skip already-processed docs
+        const where = body.force ? {
             mimeType: {
                 contains: 'image/'
             }
-        };
-        // Unless force=true, skip already-processed docs
-        if (!body.force) {
-            where.or = [
+        } : {
+            and: [
                 {
-                    'imageOptimizer.status': {
-                        not_equals: 'complete'
+                    mimeType: {
+                        contains: 'image/'
                     }
                 },
                 {
-                    'imageOptimizer.status': {
-                        exists: false
-                    }
+                    or: [
+                        {
+                            'imageOptimizer.status': {
+                                not_equals: 'complete'
+                            }
+                        },
+                        {
+                            'imageOptimizer.status': {
+                                exists: false
+                            }
+                        }
+                    ]
                 }
-            ];
-        }
+            ]
+        };
         let queued = 0;
         let page = 1;
         let hasMore = true;
@@ -67,13 +76,18 @@ export const createRegenerateHandler = (resolvedConfig)=>{
             hasMore = result.hasNextPage;
             page++;
         }
-        // Fire the job runner (non-blocking)
+        req.payload.logger.info(`Image optimizer: queued ${queued} images from '${collectionSlug}' for regeneration`);
+        // Fire the job runner — use waitUntil to keep the serverless function alive
+        // after the response is sent, so jobs actually complete on Vercel/serverless.
         if (queued > 0) {
-            req.payload.jobs.run().catch((err)=>{
+            const runPromise = req.payload.jobs.run({
+                limit: queued
+            }).catch((err)=>{
                 req.payload.logger.error({
                     err
                 }, 'Regeneration job runner failed');
             });
+            waitUntil(runPromise);
         }
         return Response.json({
             queued,

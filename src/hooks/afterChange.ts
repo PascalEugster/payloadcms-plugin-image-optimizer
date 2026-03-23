@@ -5,6 +5,7 @@ import type { CollectionAfterChangeHook } from 'payload'
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveStaticDir } from '../utilities/resolveStaticDir.js'
 import { isCloudStorage } from '../utilities/storage.js'
+import { waitUntil } from '../utilities/waitUntil.js'
 
 export const createAfterChangeHook = (
   resolvedConfig: ResolvedImageOptimizerConfig,
@@ -61,9 +62,10 @@ export const createAfterChangeHook = (
       },
     })
 
-    req.payload.jobs.run().catch((err: unknown) => {
+    const runPromise = req.payload.jobs.run().catch((err: unknown) => {
       req.payload.logger.error({ err }, 'Image optimizer job runner failed')
     })
+    waitUntil(runPromise)
 
     return doc
   }
