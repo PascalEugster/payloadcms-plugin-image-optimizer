@@ -17,7 +17,8 @@ Built and maintained by [inoo.ch](https://inoo.ch) — a Swiss digital agency cr
 - **Bulk regeneration** — Re-process existing images from the admin UI with progress tracking
 - **Per-collection config** — Override formats, quality, and dimensions per collection
 - **Admin UI** — Status badges, file size savings, and blur previews in the sidebar
-- **ImageBox component** — Drop-in Next.js `<Image>` wrapper with automatic ThumbHash blur
+- **ImageBox component** — Drop-in Next.js `<Image>` wrapper with automatic ThumbHash blur and smooth fade-in
+- **FadeImage component** — Standalone fade-in image for custom setups using `getImageOptimizerProps()`
 
 ## Requirements
 
@@ -132,6 +133,31 @@ collections: {
 
 All format conversion runs as async background jobs, so uploads return immediately.
 
+### Vercel / Serverless Deployment
+
+Image processing (especially AVIF encoding, ThumbHash generation, and metadata stripping) can exceed the default serverless function timeout. The plugin exports a recommended `maxDuration` that you can re-export from your Payload API route:
+
+```ts
+// src/app/(payload)/api/[...slug]/route.ts
+export { maxDuration } from '@inoo-ch/payload-image-optimizer'
+```
+
+This sets a 60-second timeout, which is sufficient for most configurations. Without this, heavy processing configs may cause upload timeouts on Vercel.
+
+#### Large file uploads with Vercel Blob
+
+Even with `maxDuration` and `bodySizeLimit` configured, large file uploads through the Payload admin still go through the Next.js API route, which hits Vercel's request body size limit (4.5MB on serverless functions). If you're using `@payloadcms/storage-vercel-blob`, enable `clientUploads` to bypass this entirely:
+
+```ts
+vercelBlobStorage({
+  collections: { media: true },
+  token: process.env.BLOB_READ_WRITE_TOKEN,
+  clientUploads: true, // uploads go directly from browser to Vercel Blob
+})
+```
+
+With `clientUploads: true`, files upload directly from the browser to Vercel Blob (up to 5TB) and the server only handles the small JSON metadata payload. This eliminates body size limit errors regardless of file size.
+
 ## How It Differs from Payload's Default Image Handling
 
 Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and can resize images and generate sizes on upload. This plugin **does not double-process your images** — it intercepts the raw upload in a `beforeChange` hook *before* Payload's own sharp pipeline runs, and writes the optimized buffer back to `req.file.data`. When Payload's built-in `uploadFiles` step kicks in to generate your configured sizes, it works from the already-optimized file, not the raw original.
@@ -146,7 +172,7 @@ Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and ca
 | Blur hash placeholders | Requires custom hooks | ThumbHash generated automatically |
 | Optimization status & savings | Not available | Admin sidebar panel per image |
 | Bulk re-process existing images | Not available | One-click regeneration with progress tracking |
-| Next.js `<Image>` with blur placeholder | Manual wiring | Drop-in `<ImageBox>` component |
+| Next.js `<Image>` with blur placeholder | Manual wiring | Drop-in `<ImageBox>` / `<FadeImage>` components |
 | Per-collection format/quality overrides | N/A | Supported |
 
 ### CPU & Resource Impact
@@ -171,7 +197,7 @@ A **Regenerate Images** button appears in collection list views, allowing you to
 
 ## ImageBox Component
 
-The plugin exports an `ImageBox` component — a Next.js `<Image>` wrapper that automatically applies ThumbHash blur placeholders:
+The plugin exports an `ImageBox` component — a Next.js `<Image>` wrapper that automatically applies ThumbHash blur placeholders with a smooth blur-to-sharp fade transition:
 
 ```tsx
 import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
@@ -181,10 +207,17 @@ import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
 
 // Or use a plain URL string
 <ImageBox media="/images/photo.jpg" alt="Photo" width={800} height={600} />
+
+// Disable fade animation
+<ImageBox media={doc.image} alt="Photo" fade={false} />
+
+// Custom fade duration (default: 500ms)
+<ImageBox media={doc.image} alt="Photo" fadeDuration={300} />
 ```
 
 **Features:**
 - Automatic ThumbHash `blurDataURL` from the media document
+- Smooth blur-to-sharp fade transition on load (enabled by default)
 - Respects Payload focal point (`focalX` / `focalY`) for `objectPosition`
 - Lazy loading by default, with `priority` prop for above-the-fold images
 - Cache busting via `updatedAt` timestamp
@@ -254,7 +287,7 @@ Copy-paste this instruction to your AI coding agent to have it autonomously inte
 >
 > 1. Which upload collections should be optimized and with what settings
 > 2. Whether to use `replaceOriginal` or keep originals alongside variants
-> 3. Where to add `<ImageBox>` or `getImageOptimizerProps()` in the frontend for ThumbHash blur placeholders and focal point support
+> 3. Where to add `<ImageBox>`, `<FadeImage>`, or `getImageOptimizerProps()` in the frontend for ThumbHash blur placeholders with smooth fade-in and focal point support
 > 4. Whether any existing image rendering code should use the optimized variants
 >
 > Use the zero-config default (`collections: { <slug>: true }`) unless the project has specific requirements that call for custom settings.

@@ -81,13 +81,14 @@ export const createRegenerateHandler = (resolvedConfig)=>{
         // after the response is sent, so jobs actually complete on Vercel/serverless.
         if (queued > 0) {
             const runPromise = req.payload.jobs.run({
-                limit: queued
+                limit: queued,
+                sequential: true
             }).catch((err)=>{
                 req.payload.logger.error({
                     err
                 }, 'Regeneration job runner failed');
             });
-            waitUntil(runPromise);
+            waitUntil(runPromise, req);
         }
         return Response.json({
             queued,

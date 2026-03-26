@@ -9,6 +9,12 @@ import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js';
 import { createRegenerateHandler, createRegenerateStatusHandler } from './endpoints/regenerate.js';
 export { defaultImageOptimizerFields } from './fields/imageOptimizerField.js';
 export { encodeImageToThumbHash, decodeThumbHashToDataURL } from './utilities/thumbhash.js';
+/**
+ * Recommended maxDuration for the Payload API route on Vercel.
+ * Re-export this in your route file:
+ *
+ *   export { maxDuration } from '@inoo-ch/payload-image-optimizer'
+ */ export const maxDuration = 60;
 export const imageOptimizer = (pluginOptions)=>(config)=>{
         const resolvedConfig = resolveConfig(pluginOptions);
         const targetSlugs = Object.keys(resolvedConfig.collections);

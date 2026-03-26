@@ -48,12 +48,14 @@ export const createAfterChangeHook = (resolvedConfig, collectionSlug)=>{
                 docId: String(doc.id)
             }
         });
-        const runPromise = req.payload.jobs.run().catch((err)=>{
+        const runPromise = req.payload.jobs.run({
+            sequential: true
+        }).catch((err)=>{
             req.payload.logger.error({
                 err
             }, 'Image optimizer job runner failed');
         });
-        waitUntil(runPromise);
+        waitUntil(runPromise, req);
         return doc;
     };
 };

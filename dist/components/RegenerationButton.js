@@ -1,7 +1,11 @@
 'use client';
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-const STALL_THRESHOLD = 5;
+const POLL_INTERVAL_MS = 2000;
+// With sequential processing each image takes ~4-5s, so no progress for 30s
+// (15 polls) strongly suggests a real stall rather than slow processing.
+const STALL_THRESHOLD = 15;
+const SESSION_KEY = 'imageOptimizer_running';
 export const RegenerationButton = ()=>{
     const [isRunning, setIsRunning] = useState(false);
     const [progress, setProgress] = useState(null);
@@ -44,6 +48,13 @@ export const RegenerationButton = ()=>{
             intervalRef.current = null;
         }
     }, []);
+    const startPolling = useCallback((pollFn)=>{
+        // Prevent duplicate intervals
+        stopPolling();
+        intervalRef.current = setInterval(pollFn, POLL_INTERVAL_MS);
+    }, [
+        stopPolling
+    ]);
     const pollProgress = useCallback(async ()=>{
         if (!collectionSlug) return;
         try {
@@ -54,21 +65,24 @@ export const RegenerationButton = ()=>{
                 // Stop polling when no more pending
                 if (data.pending <= 0) {
                     setIsRunning(false);
+                    setStalled(false);
                     stopPolling();
+                    sessionStorage.removeItem(SESSION_KEY);
                     return;
                 }
-                // Stall detection
+                // Stall detection — warn but keep polling so we detect when jobs resume
                 const processed = data.complete + data.errored;
                 if (processed === stallRef.current.lastProcessed) {
                     stallRef.current.stallCount += 1;
                 } else {
                     stallRef.current.stallCount = 0;
                     stallRef.current.lastProcessed = processed;
+                    // Clear stall warning when progress resumes
+                    setStalled(false);
                 }
                 if (stallRef.current.stallCount >= STALL_THRESHOLD) {
-                    stopPolling();
-                    setIsRunning(false);
                     setStalled(true);
+                // Keep polling — jobs may still be running server-side
                 }
             }
         } catch  {
@@ -78,39 +92,47 @@ export const RegenerationButton = ()=>{
         collectionSlug,
         stopPolling
     ]);
-    // On mount (once collectionSlug is known), check if there's an ongoing job and resume polling
+    // On mount: fetch stats for the counter display. If the user previously
+    // triggered regeneration (sessionStorage flag) and there are still pending
+    // images, resume polling so the UI reconnects after page navigation.
     useEffect(()=>{
         if (!collectionSlug) return;
         let cancelled = false;
-        const checkOngoing = async ()=>{
+        const loadStats = async ()=>{
             try {
                 const res = await fetch(`/api/image-optimizer/regenerate?collection=${collectionSlug}`);
                 if (!res.ok || cancelled) return;
                 const data = await res.json();
-                // Always store stats on mount
                 setStats(data);
-                if (data.pending > 0) {
+                // Resume polling only if the user triggered regeneration in this session
+                const wasRunning = sessionStorage.getItem(SESSION_KEY) === collectionSlug;
+                if (wasRunning && data.pending > 0) {
                     setProgress(data);
                     setIsRunning(true);
                     setStalled(false);
-                    setQueued(null);
                     stallRef.current = {
                         lastProcessed: data.complete + data.errored,
                         stallCount: 0
                     };
-                    intervalRef.current = setInterval(pollProgress, 2000);
+                    startPolling(pollProgress);
+                } else if (wasRunning && data.pending <= 0) {
+                    // Jobs finished while we were away — clear the flag
+                    sessionStorage.removeItem(SESSION_KEY);
                 }
             } catch  {
             // ignore
             }
         };
-        checkOngoing();
+        loadStats();
         return ()=>{
             cancelled = true;
+            stopPolling();
         };
     }, [
         collectionSlug,
-        pollProgress
+        pollProgress,
+        startPolling,
+        stopPolling
     ]);
     // Refresh stats when regeneration finishes (isRunning transitions from true to false)
     useEffect(()=>{
@@ -167,8 +189,10 @@ export const RegenerationButton = ()=>{
                 setIsRunning(false);
                 return;
             }
+            // Persist running state so we can resume after page navigation
+            sessionStorage.setItem(SESSION_KEY, collectionSlug);
             // Start polling
-            intervalRef.current = setInterval(pollProgress, 2000);
+            startPolling(pollProgress);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
             setIsRunning(false);
@@ -176,10 +200,10 @@ export const RegenerationButton = ()=>{
     };
     // Cleanup interval on unmount
     useEffect(()=>{
-        return ()=>{
-            if (intervalRef.current) clearInterval(intervalRef.current);
-        };
-    }, []);
+        return ()=>stopPolling();
+    }, [
+        stopPolling
+    ]);
     if (!collectionSlug) return null;
     const progressPercent = progress && progress.total > 0 ? Math.round((progress.complete + progress.errored) / progress.total * 100) : 0;
     const showProgressBar = isRunning && progress || stalled && progress;
@@ -305,13 +329,11 @@ export const RegenerationButton = ()=>{
                     fontSize: '13px'
                 },
                 children: [
-                    "Processing finished with issues. ",
-                    progress.errored + progress.pending,
+                    "Processing appears slow — ",
+                    progress.pending,
                     " image",
-                    progress.errored + progress.pending !== 1 ? 's' : '',
-                    " failed",
-                    progress.pending > 0 ? ` (${progress.pending} stuck)` : '',
-                    ". Re-run to retry."
+                    progress.pending !== 1 ? 's' : '',
+                    " still pending. Jobs may still be running server-side."
                 ]
             }),
             showProgressBar && /*#__PURE__*/ _jsxs("div", {
@@ -382,14 +404,14 @@ export const RegenerationButton = ()=>{
                     })
                 ]
             }),
-            !isRunning && progress && progress.complete > 0 && queued !== 0 && !confirming && /*#__PURE__*/ _jsxs("span", {
+            !isRunning && !stalled && progress && progress.complete > 0 && queued !== 0 && !confirming && /*#__PURE__*/ _jsxs("span", {
                 style: {
                     fontSize: '13px'
                 },
                 children: [
                     /*#__PURE__*/ _jsxs("span", {
                         style: {
-                            color: progress.errored > 0 || stalled ? '#f59e0b' : '#10b981'
+                            color: progress.errored > 0 ? '#f59e0b' : '#10b981'
                         },
                         children: [
                             "Done! ",
@@ -399,19 +421,19 @@ export const RegenerationButton = ()=>{
                             " optimized (across entire collection)."
                         ]
                     }),
-                    (progress.errored > 0 || stalled && progress.pending > 0) && /*#__PURE__*/ _jsxs("span", {
+                    progress.errored > 0 && /*#__PURE__*/ _jsxs("span", {
                         style: {
                             color: '#ef4444'
                         },
                         children: [
                             ' ',
-                            progress.errored + (stalled ? progress.pending : 0),
+                            progress.errored,
                             " failed."
                         ]
                     })
                 ]
             }),
-            !isRunning && stats && stats.total > 0 && /*#__PURE__*/ _jsxs("div", {
+            !isRunning && !stalled && stats && stats.total > 0 && /*#__PURE__*/ _jsxs("div", {
                 style: {
                     marginLeft: 'auto',
                     display: 'flex',

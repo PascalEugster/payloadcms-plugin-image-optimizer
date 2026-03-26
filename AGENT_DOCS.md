@@ -219,7 +219,7 @@ Import from `@inoo-ch/payload-image-optimizer/client`:
 
 ### `ImageBox` Component
 
-Drop-in Next.js `<Image>` wrapper with automatic ThumbHash blur placeholders and focal point support.
+Drop-in Next.js `<Image>` wrapper with automatic ThumbHash blur placeholders, focal point support, and smooth fade-in transition.
 
 ```tsx
 import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
@@ -229,20 +229,54 @@ import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
 
 // With a plain URL string
 <ImageBox media="/images/fallback.jpg" alt="Fallback" width={800} height={600} />
+
+// Disable fade animation
+<ImageBox media={doc.image} alt="Photo" fade={false} />
+
+// Custom fade duration
+<ImageBox media={doc.image} alt="Photo" fadeDuration={300} />
 ```
 
 **Props:** Extends all Next.js `ImageProps` (except `src`), plus:
 
-| Prop | Type | Description |
-|------|------|-------------|
-| `media` | `MediaResource \| string` | Payload media document or URL string |
-| `alt` | `string` | Alt text (overrides `media.alt`) |
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `media` | `MediaResource \| string` | — | Payload media document or URL string |
+| `alt` | `string` | — | Alt text (overrides `media.alt`) |
+| `fade` | `boolean` | `true` | Enable smooth blur-to-sharp fade transition on load |
+| `fadeDuration` | `number` | `500` | Duration of the fade animation in milliseconds |
 
 Automatically applies:
 - ThumbHash blur placeholder (if available on the media resource)
+- Smooth blur-to-sharp fade transition on image load (disable with `fade={false}`)
 - Focal point positioning via `objectPosition` (using `focalX`/`focalY`)
 - Cache-busting via `updatedAt` query parameter
 - `objectFit: 'cover'` by default (overridable via `style`)
+
+### `FadeImage` Component
+
+Standalone Next.js `<Image>` wrapper with fade-in transition for use with `getImageOptimizerProps()`. Use this when you have a custom image component and want the fade effect without `ImageBox`.
+
+```tsx
+import { FadeImage, getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/client'
+
+const optimizerProps = getImageOptimizerProps(resource)
+
+<FadeImage
+  src={resource.url}
+  alt=""
+  width={800}
+  height={600}
+  optimizerProps={optimizerProps}
+/>
+```
+
+**Props:** Extends all Next.js `ImageProps` (except `placeholder`, `blurDataURL`, `onLoad`), plus:
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `optimizerProps` | `ImageOptimizerProps` | — | Props returned by `getImageOptimizerProps()` |
+| `fadeDuration` | `number` | `500` | Duration of the fade animation in milliseconds |
 
 ### `getImageOptimizerProps()` Utility
 
@@ -292,6 +326,29 @@ The plugin registers two Payload job tasks (retries: 2 each):
 |-----------|---------|---------|
 | `imageOptimizer_convertFormats` | After upload (`afterChange` hook) | Generate format variants for a single document |
 | `imageOptimizer_regenerateDocument` | Bulk regeneration endpoint | Fully re-optimize a single document (resize + thumbhash + all variants) |
+
+## Vercel / Serverless Deployment
+
+Image processing can exceed the default serverless function timeout. Re-export the plugin's `maxDuration` from the Payload API route:
+
+```ts
+// src/app/(payload)/api/[...slug]/route.ts
+export { maxDuration } from '@inoo-ch/payload-image-optimizer'
+```
+
+This sets a 60-second timeout. Without this, uploads with heavy configs (AVIF + ThumbHash + metadata stripping) may time out on Vercel.
+
+### Large file uploads with Vercel Blob
+
+Even with `maxDuration` and `bodySizeLimit`, large uploads hit Vercel's 4.5MB request body limit on serverless functions. If using `@payloadcms/storage-vercel-blob`, enable `clientUploads: true` so files upload directly from the browser to Vercel Blob (up to 5TB), bypassing the server body size limit entirely:
+
+```ts
+vercelBlobStorage({
+  collections: { media: true },
+  token: process.env.BLOB_READ_WRITE_TOKEN,
+  clientUploads: true,
+})
+```
 
 ## Full Example
 
@@ -360,6 +417,7 @@ import type {
 
 import type {
   ImageBoxProps,
+  FadeImageProps,
   ImageOptimizerProps,    // return type of getImageOptimizerProps
 } from '@inoo-ch/payload-image-optimizer/client'
 ```
