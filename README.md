@@ -17,7 +17,9 @@ Built and maintained by [inoo.ch](https://inoo.ch) — a Swiss digital agency cr
 - **Bulk regeneration** — Re-process existing images from the admin UI with progress tracking
 - **Per-collection config** — Override formats, quality, and dimensions per collection
 - **Admin UI** — Status badges, file size savings, and blur previews in the sidebar
-- **ImageBox component** — Drop-in Next.js `<Image>` wrapper with automatic ThumbHash blur and smooth fade-in
+- **ImageBox component** — Drop-in Next.js `<Image>` wrapper with ThumbHash blur, fade-in, responsive variant loading, and smart `sizes` defaults
+- **Responsive variant loader** — Serves pre-generated Payload size variants directly, bypassing `/_next/image` re-optimization
+- **Template-friendly** — `getOptimizedImageProps()` integrates with the Payload website template in 3 lines
 - **FadeImage component** — Standalone fade-in image for custom setups using `getImageOptimizerProps()`
 
 ## Requirements
@@ -218,32 +220,63 @@ The plugin adds an **Optimization Status** panel to the document sidebar showing
 
 A **Regenerate Images** button appears in collection list views, allowing you to bulk re-process existing images with a real-time progress bar.
 
-## ImageBox Component
+## Displaying Images
 
-The plugin exports an `ImageBox` component — a Next.js `<Image>` wrapper that automatically applies ThumbHash blur placeholders with a smooth blur-to-sharp fade transition:
+### Option 1: `ImageBox` (New Projects)
+
+Drop-in Next.js `<Image>` wrapper — the easiest way to display images with best practices:
 
 ```tsx
 import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
 
-// Pass a Payload media document directly
-<ImageBox media={doc.heroImage} alt="Hero" />
+// Hero image — fill mode with priority
+<ImageBox media={doc.heroImage} alt="Hero" fill priority />
 
-// Or use a plain URL string
-<ImageBox media="/images/photo.jpg" alt="Photo" width={800} height={600} />
+// Card grid — explicit sizes hint
+<ImageBox media={doc.image} alt="Card" fill sizes="(max-width: 768px) 100vw, 33vw" />
 
-// Disable fade animation
-<ImageBox media={doc.image} alt="Photo" fade={false} />
-
-// Custom fade duration (default: 500ms)
-<ImageBox media={doc.image} alt="Photo" fadeDuration={300} />
+// Fixed dimensions
+<ImageBox media={doc.avatar} alt="Avatar" width={64} height={64} fade={false} />
 ```
 
-**Features:**
-- Automatic ThumbHash `blurDataURL` from the media document
-- Smooth blur-to-sharp fade transition on load (enabled by default)
-- Respects Payload focal point (`focalX` / `focalY`) for `objectPosition`
-- Lazy loading by default, with `priority` prop for above-the-fold images
-- Cache busting via `updatedAt` timestamp
+**What it does automatically:**
+- Per-image ThumbHash blur placeholder
+- Smooth blur-to-sharp fade transition
+- Focal point positioning from `focalX`/`focalY`
+- Responsive variant loader — serves pre-generated Payload size variants directly instead of `/_next/image` re-optimization (when `imageSizes` is configured on the collection)
+- Smart `sizes` default for fill mode — `(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw` instead of the browser's `100vw` assumption
+- Cache busting via `updatedAt`
+
+### Option 2: `getOptimizedImageProps()` (Existing Projects / Payload Website Template)
+
+If you're using the [Payload website template](https://github.com/payloadcms/payload/tree/main/templates/website) or have an existing `<NextImage>` component, add 3 lines:
+
+```tsx
+import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/client'
+
+const optimizedProps = getOptimizedImageProps(resource)
+
+<NextImage
+  {...optimizedProps}   // ThumbHash blur, focal point, variant loader
+  src={src}
+  alt={alt}
+  fill={fill}
+  sizes={sizes}
+  quality={80}
+/>
+```
+
+This replaces the template's hardcoded blur placeholder with per-image ThumbHash, adds focal point support, and enables responsive variant loading.
+
+### Responsive Variant Loading
+
+When your collection has `imageSizes` configured (e.g., `thumbnail: 300`, `medium: 900`, `large: 1400`), both `ImageBox` and `getOptimizedImageProps()` automatically create a hybrid `next/image` loader that:
+
+1. Picks the smallest pre-generated variant >= the requested width
+2. Serves it directly from your storage (bypasses `/_next/image` — no double optimization)
+3. Falls back to `/_next/image` when no close variant match exists
+
+This means images uploaded to collections with `imageSizes` get responsive loading for free — no extra config needed.
 
 ## Document Schema
 
@@ -310,8 +343,9 @@ Copy-paste this instruction to your AI coding agent to have it autonomously inte
 >
 > 1. Which upload collections should be optimized and with what settings
 > 2. Whether to use `replaceOriginal` or keep originals alongside variants
-> 3. Where to add `<ImageBox>`, `<FadeImage>`, or `getImageOptimizerProps()` in the frontend for ThumbHash blur placeholders with smooth fade-in and focal point support
-> 4. Whether any existing image rendering code should use the optimized variants
+> 3. For **new components**: use `<ImageBox>` — it handles ThumbHash blur, fade-in, focal point, responsive variant loading, and smart `sizes` defaults automatically
+> 4. For **existing components** (especially the Payload website template's `ImageMedia`): use `getOptimizedImageProps(resource)` — a single spread that adds ThumbHash, focal point, and variant loader to any `<NextImage>`
+> 5. If collections have `imageSizes` configured, the variant loader will automatically serve pre-generated size variants directly instead of going through `/_next/image` re-optimization
 >
 > Use the zero-config default (`collections: { <slug>: true }`) unless the project has specific requirements that call for custom settings.
 

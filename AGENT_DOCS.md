@@ -219,24 +219,24 @@ Get current optimization status for a collection. Requires authentication.
 
 Import from `@inoo-ch/payload-image-optimizer/client`:
 
-### `ImageBox` Component
+### `ImageBox` Component (Recommended)
 
-Drop-in Next.js `<Image>` wrapper with automatic ThumbHash blur placeholders, focal point support, and smooth fade-in transition.
+Drop-in Next.js `<Image>` wrapper — the easiest way to display images with best practices. Automatically handles ThumbHash blur placeholders, focal point positioning, smooth fade-in, responsive variant loading, and smart `sizes` defaults.
 
 ```tsx
 import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
 
-// With a Payload media resource object
-<ImageBox media={doc.image} alt="Hero" fill sizes="100vw" />
+// Pass the full Payload media document — ImageBox handles everything
+<ImageBox media={doc.heroImage} alt="Hero" fill priority />
 
-// With a plain URL string
+// Card grid — explicit sizes hint for responsive loading
+<ImageBox media={doc.image} alt="Card" fill sizes="(max-width: 768px) 100vw, 33vw" />
+
+// Fixed dimensions (non-fill)
+<ImageBox media={doc.avatar} alt="Avatar" width={64} height={64} fade={false} />
+
+// Plain URL string fallback
 <ImageBox media="/images/fallback.jpg" alt="Fallback" width={800} height={600} />
-
-// Disable fade animation
-<ImageBox media={doc.image} alt="Photo" fade={false} />
-
-// Custom fade duration
-<ImageBox media={doc.image} alt="Photo" fadeDuration={300} />
 ```
 
 **Props:** Extends all Next.js `ImageProps` (except `src`), plus:
@@ -248,12 +248,139 @@ import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
 | `fade` | `boolean` | `true` | Enable smooth blur-to-sharp fade transition on load |
 | `fadeDuration` | `number` | `500` | Duration of the fade animation in milliseconds |
 
-Automatically applies:
-- ThumbHash blur placeholder (if available on the media resource)
-- Smooth blur-to-sharp fade transition on image load (disable with `fade={false}`)
-- Focal point positioning via `objectPosition` (using `focalX`/`focalY`)
-- Cache-busting via `updatedAt` query parameter
-- `objectFit: 'cover'` by default (overridable via `style`)
+**What ImageBox does automatically:**
+
+- **ThumbHash blur placeholder** — per-image blur preview from `imageOptimizer.thumbHash`
+- **Responsive variant loader** — when `media.sizes` has Payload size variants (from `imageSizes` collection config), serves pre-generated variants directly instead of going through `/_next/image` re-optimization. Falls back to `/_next/image` when no close match exists.
+- **Smart `sizes` default** — for `fill` mode without explicit `sizes`, uses `(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw` instead of the browser's `100vw` assumption
+- **Focal point positioning** — applies `objectPosition` from `focalX`/`focalY`
+- **Fade transition** — smooth blur-to-sharp animation on load
+- **Cache busting** — appends `updatedAt` as query parameter
+
+**Important:** For the variant loader to work, your collection must have `imageSizes` configured in the Payload collection config. This is how Payload generates the width variants. Without `imageSizes`, images still work but go through `/_next/image` as usual.
+
+### `getOptimizedImageProps()` — For Existing Components (e.g., Payload Website Template)
+
+Single-function integration for existing `<NextImage>` components. Returns ThumbHash, focal point, AND variant loader in one spread-friendly object. **This is the recommended way to integrate with the Payload website template's `ImageMedia` component.**
+
+```tsx
+import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/client'
+
+// In your existing ImageMedia component — 3 lines to add:
+const optimizedProps = getOptimizedImageProps(resource)
+
+<NextImage
+  {...optimizedProps}   // spreads: placeholder, blurDataURL, style, loader
+  src={src}
+  alt={alt}
+  fill={fill}
+  sizes={sizes}
+  quality={80}
+  priority={priority}
+  loading={loading}
+/>
+```
+
+**Returns:**
+```ts
+{
+  placeholder: 'blur' | 'empty',
+  blurDataURL?: string,              // data URL from ThumbHash
+  style: { objectPosition: string }, // from focalX/focalY
+  loader?: ImageLoader,              // variant-aware loader (only when media.sizes has variants)
+}
+```
+
+**Payload Website Template integration example:**
+
+If you're using the [Payload website template](https://github.com/payloadcms/payload/tree/main/templates/website), modify `src/components/Media/ImageMedia/index.tsx`:
+
+```diff
++ import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/client'
+
+  export const ImageMedia: React.FC<MediaProps> = (props) => {
+    // ... existing code ...
+
++   const optimizedProps = typeof resource === 'object' ? getOptimizedImageProps(resource) : {}
+
+    return (
+      <picture className={cn(pictureClassName)}>
+        <NextImage
++         {...optimizedProps}
+          alt={alt || ''}
+          className={cn(imgClassName)}
+          fill={fill}
+          height={!fill ? height : undefined}
+-         placeholder="blur"
+-         blurDataURL={placeholderBlur}
+          priority={priority}
+-         quality={100}
++         quality={80}
+          loading={loading}
+          sizes={sizes}
+          src={src}
+          width={!fill ? width : undefined}
+        />
+      </picture>
+    )
+  }
+```
+
+This replaces the template's hardcoded blur placeholder with per-image ThumbHash, adds focal point support, and enables variant-aware responsive loading — all in a few lines.
+
+### `getImageOptimizerProps()` — Low-Level Utility
+
+Returns only ThumbHash placeholder and focal point props (no variant loader). Use when you need granular control or don't want the variant loader.
+
+```tsx
+import { getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/client'
+
+const optimizerProps = getImageOptimizerProps(media)
+
+<NextImage
+  src={media.url}
+  alt={media.alt}
+  {...optimizerProps}
+/>
+```
+
+**Returns:**
+```ts
+{
+  placeholder: 'blur' | 'empty',
+  blurDataURL?: string,
+  style: { objectPosition: string },
+}
+```
+
+### `createVariantLoader()` — Custom Loader Factory
+
+Creates a Next.js Image `loader` that maps requested widths to pre-generated Payload size variants. Use when building fully custom image components.
+
+```tsx
+import { createVariantLoader } from '@inoo-ch/payload-image-optimizer/client'
+
+const loader = createVariantLoader(media) // returns undefined when no variants
+
+<NextImage loader={loader} src={media.url} sizes="100vw" ... />
+```
+
+**How the hybrid loader works:**
+1. Finds the smallest Payload size variant with width >= requested width
+2. If found → serves the pre-generated variant URL directly (bypasses `/_next/image`)
+3. If no variant is large enough → uses the largest variant if it covers >= 80% of requested width
+4. If no close match at all → falls back to `/_next/image` re-optimization
+
+### `getDefaultSizes()` — Smart Sizes Helper
+
+Returns a sensible default `sizes` attribute for fill-mode images:
+
+```tsx
+import { getDefaultSizes } from '@inoo-ch/payload-image-optimizer/client'
+
+const sizes = getDefaultSizes(true) // '(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw'
+const sizes = getDefaultSizes(false) // undefined (let next/image use 1x/2x descriptors)
+```
 
 ### `FadeImage` Component
 
@@ -280,33 +407,16 @@ const optimizerProps = getImageOptimizerProps(resource)
 | `optimizerProps` | `ImageOptimizerProps` | — | Props returned by `getImageOptimizerProps()` |
 | `fadeDuration` | `number` | `500` | Duration of the fade animation in milliseconds |
 
-### `getImageOptimizerProps()` Utility
+### Client Utility Decision Guide
 
-For integrating with existing image components (e.g., the Payload website template's `ImageMedia`):
-
-```tsx
-import { getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/client'
-import NextImage from 'next/image'
-
-const optimizerProps = getImageOptimizerProps(media)
-
-<NextImage
-  src={media.url}
-  alt={media.alt}
-  {...optimizerProps}
-/>
-```
-
-**Returns:**
-```ts
-{
-  placeholder: 'blur' | 'empty',
-  blurDataURL?: string,           // data URL from ThumbHash (only when placeholder is 'blur')
-  style: {
-    objectPosition: string,       // e.g. '50% 30%' from focalX/focalY, or 'center'
-  },
-}
-```
+| Scenario | Use | Why |
+|----------|-----|-----|
+| **New project, fresh components** | `ImageBox` | Zero-config, handles everything |
+| **Existing project with Payload website template** | `getOptimizedImageProps()` | 3-line change to existing `ImageMedia` |
+| **Custom component, want blur + focal + variants** | `getOptimizedImageProps()` | Single spread, all features |
+| **Custom component, only want blur + focal** | `getImageOptimizerProps()` | Lighter, no loader |
+| **Fully custom loader logic** | `createVariantLoader()` | Granular control |
+| **Custom component with fade animation** | `FadeImage` + `getImageOptimizerProps()` | Fade without ImageBox |
 
 ## Server-Side Utilities
 
@@ -415,14 +525,45 @@ import type {
   CollectionOptimizerConfig,
   FormatQuality,
   ImageFormat,            // 'webp' | 'avif'
+  MediaResource,          // type for media documents passed to client utilities
+  MediaSizeVariant,       // type for individual size variants in media.sizes
 } from '@inoo-ch/payload-image-optimizer'
 
 import type {
   ImageBoxProps,
   FadeImageProps,
   ImageOptimizerProps,    // return type of getImageOptimizerProps
+  OptimizedImageProps,    // return type of getOptimizedImageProps
 } from '@inoo-ch/payload-image-optimizer/client'
 ```
+
+### `MediaResource` Type
+
+The `MediaResource` type represents a Payload media document as consumed by client utilities. It accepts the full Payload media response including the `sizes` field (generated by Payload when `imageSizes` is configured on the collection).
+
+```ts
+type MediaResource = {
+  url?: string | null
+  alt?: string | null
+  width?: number | null
+  height?: number | null
+  filename?: string | null
+  focalX?: number | null
+  focalY?: number | null
+  imageOptimizer?: { thumbHash?: string | null } | null
+  updatedAt?: string
+  sizes?: Record<string, {
+    url?: string | null
+    width?: number | null
+    height?: number | null
+    mimeType?: string | null
+    filesize?: number | null
+    filename?: string | null
+  } | undefined>
+}
+```
+
+The type is intentionally loose — it structurally matches any Payload media document whether or not the plugin is installed. You can pass your generated Payload types directly without casting.
 
 ## Context Flags
 
