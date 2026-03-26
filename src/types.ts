@@ -46,6 +46,15 @@ export type ImageOptimizerData = {
   thumbHash?: string | null
 }
 
+export type MediaSizeVariant = {
+  url?: string | null
+  width?: number | null
+  height?: number | null
+  mimeType?: string | null
+  filesize?: number | null
+  filename?: string | null
+}
+
 export type MediaResource = {
   url?: string | null
   alt?: string | null
@@ -56,4 +65,5 @@ export type MediaResource = {
   focalY?: number | null
   imageOptimizer?: ImageOptimizerData | null
   updatedAt?: string
+  sizes?: Record<string, MediaSizeVariant | undefined>
 }

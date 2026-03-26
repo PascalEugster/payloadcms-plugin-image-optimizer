@@ -11,7 +11,7 @@ import { createConvertFormatsHandler } from './tasks/convertFormats.js'
 import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js'
 import { createRegenerateHandler, createRegenerateStatusHandler } from './endpoints/regenerate.js'
 
-export type { ImageOptimizerConfig, ImageFormat, FormatQuality, CollectionOptimizerConfig, ImageOptimizerData, MediaResource, FieldsOverride } from './types.js'
+export type { ImageOptimizerConfig, ImageFormat, FormatQuality, CollectionOptimizerConfig, ImageOptimizerData, MediaResource, MediaSizeVariant, FieldsOverride } from './types.js'
 export { defaultImageOptimizerFields } from './fields/imageOptimizerField.js'
 
 export { encodeImageToThumbHash, decodeThumbHashToDataURL } from './utilities/thumbhash.js'

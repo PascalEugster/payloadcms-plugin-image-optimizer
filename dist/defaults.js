@@ -1,4 +1,5 @@
 export const resolveConfig = (config)=>({
+        clientOptimization: config.clientOptimization ?? true,
         collections: config.collections,
         disabled: config.disabled ?? false,
         formats: config.formats ?? [
