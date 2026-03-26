@@ -3,7 +3,7 @@ import type { CollectionSlug } from 'payload'
 import type { ImageOptimizerConfig, ResolvedCollectionOptimizerConfig, ResolvedImageOptimizerConfig } from './types.js'
 
 export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimizerConfig => ({
-  clientOptimization: config.clientOptimization ?? false,
+  clientOptimization: config.clientOptimization ?? true,
   collections: config.collections,
   disabled: config.disabled ?? false,
   formats: config.formats ?? [

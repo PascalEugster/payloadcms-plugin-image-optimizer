@@ -86,7 +86,7 @@ imageOptimizer({
   maxDimensions: { width: 2560, height: 2560 },
   generateThumbHash: true,
   stripMetadata: true,
-  clientOptimization: false,
+  clientOptimization: true,
   disabled: false,
 })
 ```
@@ -100,7 +100,7 @@ imageOptimizer({
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions. Images are resized to fit within these bounds. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholders for instant image previews. |
 | `stripMetadata` | `boolean` | `true` | Remove EXIF and other metadata from images. |
-| `clientOptimization` | `boolean` | `false` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
+| `clientOptimization` | `boolean` | `true` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
 | `disabled` | `boolean` | `false` | Disable optimization while keeping schema fields intact. |
 
 ### Per-Collection Overrides
