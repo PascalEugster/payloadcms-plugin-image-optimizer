@@ -59,6 +59,7 @@ imageOptimizer({
   stripMetadata: true,                              // strip EXIF data
   generateThumbHash: true,                          // generate blur placeholders
   replaceOriginal: true,                            // convert main file to primary format
+  clientOptimization: false,                        // pre-resize in browser before upload
   disabled: false,                                  // keep fields but skip all processing
 })
 ```
@@ -71,6 +72,7 @@ imageOptimizer({
 | `stripMetadata` | `boolean` | `true` | Strip EXIF, ICC, XMP metadata. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholder. |
 | `replaceOriginal` | `boolean` | `true` | Replace the original file with the primary format. |
+| `clientOptimization` | `boolean` | `false` | Pre-resize images in browser via Canvas API before upload. Reduces upload size 90%+ for large images. |
 | `disabled` | `boolean` | `false` | Keep schema fields but disable all processing. |
 
 ### Per-Collection Overrides (`CollectionOptimizerConfig`)

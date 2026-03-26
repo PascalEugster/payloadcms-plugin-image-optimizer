@@ -66,6 +66,7 @@ const buildConfigWithMemoryDB = async () => {
     },
     plugins: [
       imageOptimizer({
+        clientOptimization: true,
         collections: {
           media: true,
           avatars: {

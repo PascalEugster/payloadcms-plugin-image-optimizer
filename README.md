@@ -86,6 +86,7 @@ imageOptimizer({
   maxDimensions: { width: 2560, height: 2560 },
   generateThumbHash: true,
   stripMetadata: true,
+  clientOptimization: false,
   disabled: false,
 })
 ```
@@ -99,6 +100,7 @@ imageOptimizer({
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions. Images are resized to fit within these bounds. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholders for instant image previews. |
 | `stripMetadata` | `boolean` | `true` | Remove EXIF and other metadata from images. |
+| `clientOptimization` | `boolean` | `false` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
 | `disabled` | `boolean` | `false` | Disable optimization while keeping schema fields intact. |
 
 ### Per-Collection Overrides
@@ -122,6 +124,27 @@ collections: {
   },
 }
 ```
+
+### Client-Side Optimization
+
+When `clientOptimization: true` is set, images are pre-resized in the browser before uploading. This uses the Canvas API (zero additional dependencies) to shrink large images to fit within `maxDimensions` before they enter the upload pipeline.
+
+```ts
+imageOptimizer({
+  clientOptimization: true,
+  collections: { media: true },
+})
+```
+
+**How it helps:**
+- A 12MB DSLR photo is resized to ~100-500KB *before* upload — 90%+ less data transferred
+- Especially important with cloud storage + `clientUploads: true`, where files round-trip through blob storage
+- Reduces serverless function processing time (smaller input = faster sharp conversion)
+- EXIF metadata is stripped automatically (Canvas output has no metadata)
+
+**What stays server-side:** Format conversion (WebP/AVIF), ThumbHash generation, and variant creation still happen on the server with sharp for quality consistency. The client only handles resize — the highest-impact optimization with zero quality trade-off.
+
+**Limitations:** Only applies to single-file uploads in the admin panel. Bulk uploads and API/programmatic uploads are processed server-side as usual.
 
 ## How It Works
 

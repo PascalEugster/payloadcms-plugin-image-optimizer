@@ -16,6 +16,7 @@ export type CollectionOptimizerConfig = {
 export type FieldsOverride = (args: { defaultFields: Field[] }) => Field[]
 
 export type ImageOptimizerConfig = {
+  clientOptimization?: boolean
   collections: Partial<Record<CollectionSlug, true | CollectionOptimizerConfig>>
   disabled?: boolean
   fieldsOverride?: FieldsOverride
@@ -35,6 +36,7 @@ export type ResolvedCollectionOptimizerConfig = {
 export type ResolvedImageOptimizerConfig = Required<
   Pick<ImageOptimizerConfig, 'formats' | 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>
 > & {
+  clientOptimization: boolean
   collections: ImageOptimizerConfig['collections']
   disabled: boolean
   replaceOriginal: boolean
