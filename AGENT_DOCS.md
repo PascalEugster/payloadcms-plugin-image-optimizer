@@ -462,6 +462,21 @@ vercelBlobStorage({
 })
 ```
 
+### "This blob already exists" error
+
+When `replaceOriginal: true` (default), the plugin changes filenames (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass `allowOverwrite` to the Vercel Blob SDK.
+
+**Fix:** Set `addRandomSuffix: true` on the storage adapter:
+
+```ts
+vercelBlobStorage({
+  collections: { media: true },
+  token: process.env.BLOB_READ_WRITE_TOKEN,
+  clientUploads: true,
+  addRandomSuffix: true, // prevents "blob already exists" errors
+})
+```
+
 ## Full Example
 
 ```ts

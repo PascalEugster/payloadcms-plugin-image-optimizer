@@ -183,6 +183,23 @@ vercelBlobStorage({
 
 With `clientUploads: true`, files upload directly from the browser to Vercel Blob (up to 5TB) and the server only handles the small JSON metadata payload. This eliminates body size limit errors regardless of file size.
 
+#### "This blob already exists" error
+
+When `replaceOriginal: true` (default), the plugin changes filenames during upload (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass [`allowOverwrite`](https://vercel.com/docs/vercel-blob#overwriting-blobs) to the Vercel Blob SDK.
+
+**Workaround:** Set `addRandomSuffix: true` on the storage adapter to prevent filename collisions:
+
+```ts
+vercelBlobStorage({
+  collections: { media: true },
+  token: process.env.BLOB_READ_WRITE_TOKEN,
+  clientUploads: true,
+  addRandomSuffix: true, // prevents "blob already exists" errors
+})
+```
+
+This adds a unique suffix to every uploaded file (e.g., `photo-oYnXSVcz.webp`), avoiding collisions entirely. The trade-off is less predictable URLs, but since Payload stores the full URL in the database, this is transparent to your application.
+
 ## How It Differs from Payload's Default Image Handling
 
 Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and can resize images and generate sizes on upload. This plugin **does not double-process your images** — it intercepts the raw upload in a `beforeChange` hook *before* Payload's own sharp pipeline runs, and writes the optimized buffer back to `req.file.data`. When Payload's built-in `uploadFiles` step kicks in to generate your configured sizes, it works from the already-optimized file, not the raw original.
