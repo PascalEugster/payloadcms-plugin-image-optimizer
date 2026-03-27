@@ -81,6 +81,7 @@ const buildConfigWithMemoryDB = async () => {
         maxDimensions: { width: 2560, height: 2560 },
         stripMetadata: true,
         generateThumbHash: true,
+        // uniqueFileNames: true,
       }),
     ],
     secret: process.env.PAYLOAD_SECRET || 'test-secret_key',
