@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import path from 'path';
 import { resolveCollectionConfig } from '../defaults.js';
 import { convertFormat, generateThumbHash, stripAndResize } from '../processing/index.js';
@@ -7,24 +6,22 @@ export const createBeforeChangeHook = (resolvedConfig, collectionSlug)=>{
     return async ({ context, data, originalDoc, req })=>{
         if (context?.imageOptimizer_skip) return data;
         if (!req.file || !req.file.data || !req.file.mimetype?.startsWith('image/')) return data;
-        // Rename file to UUID before any processing, so the storage adapter
-        // never sees the original filename. Prevents Vercel Blob "already exists"
-        // errors and avoids leaking original filenames to storage.
-        // On focal-point or crop re-uploads (where Payload re-sends the same file),
-        // reuse the existing UUID filename to avoid unnecessary file churn and
-        // broken previews.
-        if (resolvedConfig.uniqueFileNames) {
+        // Apply custom filename strategy (seoFilename, uuidFilename, or user-provided).
+        // The callback returns a stem (no extension) — we append the original extension here,
+        // and replaceOriginal may swap it to the target format extension later.
+        if (resolvedConfig.generateFilename) {
             const existingFilename = originalDoc?.filename;
-            if (existingFilename) {
-                // Reuse the existing filename (may get a new extension below if replaceOriginal changes format)
-                req.file.name = existingFilename;
-                data.filename = existingFilename;
-            } else {
-                const ext = path.extname(req.file.name);
-                const uuid = crypto.randomUUID();
-                req.file.name = `${uuid}${ext}`;
-                data.filename = req.file.name;
-            }
+            const ext = path.extname(req.file.name);
+            const stem = resolvedConfig.generateFilename({
+                altText: data.alt,
+                originalFilename: req.file.name,
+                mimeType: req.file.mimetype,
+                collectionSlug,
+                existingFilename
+            });
+            const newFilename = `${stem}${ext}`;
+            req.file.name = newFilename;
+            data.filename = newFilename;
         }
         const originalSize = req.file.data.length;
         const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug);

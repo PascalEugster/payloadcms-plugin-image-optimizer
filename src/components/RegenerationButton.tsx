@@ -25,11 +25,15 @@ export const RegenerationButton: React.FC = () => {
   const [force, setForce] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [stalled, setStalled] = useState(false)
+  const [cancelled, setCancelled] = useState(false)
   const [collectionSlug, setCollectionSlug] = useState<string | null>(null)
   const [stats, setStats] = useState<RegenerationProgress | null>(null)
   const [confirming, setConfirming] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const stallRef = useRef({ lastProcessed: 0, stallCount: 0 })
+  // Snapshot of complete+errored at the moment regeneration starts,
+  // so we can compute batch-relative progress for selective regeneration.
+  const baselineRef = useRef<number | null>(null)
   const prevIsRunningRef = useRef(false)
 
   // Extract collection slug from URL after mount to avoid hydration mismatch
@@ -77,8 +81,18 @@ export const RegenerationButton: React.FC = () => {
         `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
       )
       if (res.ok) {
-        const data: RegenerationProgress = await res.json()
+        const data = await res.json()
         setProgress(data)
+
+        // Stop polling if server reports cancellation
+        if (data.cancelled) {
+          setCancelled(true)
+          setIsRunning(false)
+          setStalled(false)
+          stopPolling()
+          sessionStorage.removeItem(SESSION_KEY)
+          return
+        }
 
         // Stop polling when no more pending
         if (data.pending <= 0) {
@@ -169,16 +183,38 @@ export const RegenerationButton: React.FC = () => {
     setConfirming(false)
   }
 
+  const handleStop = async () => {
+    if (!collectionSlug) return
+    try {
+      await fetch('/api/image-optimizer/regenerate', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collectionSlug }),
+      })
+      setCancelled(true)
+      setIsRunning(false)
+      setStalled(false)
+      stopPolling()
+      sessionStorage.removeItem(SESSION_KEY)
+      fetchStats()
+    } catch {
+      // ignore cancel errors
+    }
+  }
+
   // Phase 2: Actually start regeneration (after user confirms)
   const handleConfirm = async () => {
     if (!collectionSlug) return
     setConfirming(false)
     setError(null)
     setStalled(false)
+    setCancelled(false)
     setIsRunning(true)
     setQueued(null)
     setProgress(null)
     stallRef.current = { lastProcessed: 0, stallCount: 0 }
+    // Capture current complete+errored as baseline before new jobs run
+    baselineRef.current = stats ? stats.complete + stats.errored : 0
 
     try {
       const requestBody: Record<string, unknown> = { collectionSlug, force }
@@ -222,9 +258,20 @@ export const RegenerationButton: React.FC = () => {
 
   if (!collectionSlug) return null
 
+  // When a batch is running, compute progress relative to the queued count
+  // (not the total collection) so selective regeneration shows e.g. 1/2, not 1/167.
+  const batchTotal = queued ?? progress?.total ?? 0
+  const batchProcessed = progress
+    ? (progress.complete + progress.errored) - (baselineRef.current ?? 0)
+    : 0
+  const batchComplete = progress
+    ? progress.complete - Math.max((baselineRef.current ?? 0) - (progress.errored), 0)
+    : 0
+  const batchErrored = progress ? Math.max(batchProcessed - Math.max(batchComplete, 0), 0) : 0
+
   const progressPercent =
-    progress && progress.total > 0
-      ? Math.round(((progress.complete + progress.errored) / progress.total) * 100)
+    batchTotal > 0
+      ? Math.min(Math.round((batchProcessed / batchTotal) * 100), 100)
       : 0
 
   const showProgressBar = (isRunning && progress) || (stalled && progress)
@@ -247,26 +294,41 @@ export const RegenerationButton: React.FC = () => {
         flexWrap: 'wrap',
       }}
     >
-      {!confirming && (
+      {!confirming && !isRunning && (
         <button
           onClick={handlePreflight}
-          disabled={isRunning}
           style={{
-            backgroundColor: isRunning ? '#9ca3af' : '#4f46e5',
+            backgroundColor: '#4f46e5',
             color: '#fff',
             border: 'none',
             borderRadius: '6px',
             padding: '8px 16px',
             fontSize: '14px',
             fontWeight: 500,
-            cursor: isRunning ? 'not-allowed' : 'pointer',
+            cursor: 'pointer',
           }}
         >
-          {isRunning
-            ? 'Processing images...'
-            : hasSelection
-              ? `Regenerate ${selectionCount} Selected`
-              : 'Regenerate All Images'}
+          {hasSelection
+            ? `Regenerate ${selectionCount} Selected`
+            : 'Regenerate All Images'}
+        </button>
+      )}
+
+      {!confirming && isRunning && (
+        <button
+          onClick={handleStop}
+          style={{
+            backgroundColor: '#ef4444',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '6px',
+            padding: '8px 16px',
+            fontSize: '14px',
+            fontWeight: 500,
+            cursor: 'pointer',
+          }}
+        >
+          Stop Processing
         </button>
       )}
 
@@ -336,9 +398,15 @@ export const RegenerationButton: React.FC = () => {
         </span>
       )}
 
-      {queued === 0 && !isRunning && !stalled && !confirming && (
+      {queued === 0 && !isRunning && !stalled && !confirming && !cancelled && (
         <span style={{ color: '#10b981', fontSize: '13px' }}>
           All images already optimized.
+        </span>
+      )}
+
+      {cancelled && !isRunning && !confirming && (
+        <span style={{ color: '#f59e0b', fontSize: '13px' }}>
+          Processing cancelled.
         </span>
       )}
 
@@ -360,10 +428,10 @@ export const RegenerationButton: React.FC = () => {
             }}
           >
             <span>
-              {progress.complete} / {progress.total} complete
+              {Math.max(batchProcessed, 0)} / {batchTotal} complete
             </span>
-            {progress.errored > 0 && (
-              <span style={{ color: '#ef4444' }}>{progress.errored} errors</span>
+            {batchErrored > 0 && (
+              <span style={{ color: '#ef4444' }}>{batchErrored} errors</span>
             )}
             <span>{progressPercent}%</span>
           </div>
@@ -379,16 +447,16 @@ export const RegenerationButton: React.FC = () => {
             <div
               style={{
                 height: '100%',
-                width: `${progress.total > 0 ? Math.round((progress.complete / progress.total) * 100) : 0}%`,
+                width: `${batchTotal > 0 ? Math.min(Math.round(((batchProcessed - batchErrored) / batchTotal) * 100), 100) : 0}%`,
                 backgroundColor: '#10b981',
                 transition: 'width 0.3s ease',
               }}
             />
-            {progress.errored > 0 && (
+            {batchErrored > 0 && (
               <div
                 style={{
                   height: '100%',
-                  width: `${progress.total > 0 ? Math.round((progress.errored / progress.total) * 100) : 0}%`,
+                  width: `${batchTotal > 0 ? Math.round((batchErrored / batchTotal) * 100) : 0}%`,
                   backgroundColor: '#ef4444',
                   transition: 'width 0.3s ease',
                 }}
@@ -398,14 +466,14 @@ export const RegenerationButton: React.FC = () => {
         </div>
       )}
 
-      {!isRunning && !stalled && progress && progress.complete > 0 && queued !== 0 && !confirming && (
+      {!isRunning && !stalled && !cancelled && progress && batchProcessed > 0 && queued !== 0 && !confirming && (
         <span style={{ fontSize: '13px' }}>
-          <span style={{ color: progress.errored > 0 ? '#f59e0b' : '#10b981' }}>
-            Done! {progress.complete}/{progress.total} optimized (across entire collection).
+          <span style={{ color: batchErrored > 0 ? '#f59e0b' : '#10b981' }}>
+            Done! {Math.max(batchProcessed - batchErrored, 0)}/{batchTotal} optimized.
           </span>
-          {progress.errored > 0 && (
+          {batchErrored > 0 && (
             <span style={{ color: '#ef4444' }}>
-              {' '}{progress.errored} failed.
+              {' '}{batchErrored} failed.
             </span>
           )}
         </span>

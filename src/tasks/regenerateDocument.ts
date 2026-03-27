@@ -1,4 +1,3 @@
-import crypto from 'crypto'
 import fs from 'fs/promises'
 import path from 'path'
 
@@ -10,9 +9,22 @@ import { stripAndResize, generateThumbHash, convertFormat } from '../processing/
 import { resolveStaticDir } from '../utilities/resolveStaticDir.js'
 import { fetchFileBuffer, isCloudStorage } from '../utilities/storage.js'
 
+const GLOBAL_SLUG = 'image-optimizer-state'
+
 export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOptimizerConfig) => {
   return async ({ input, req }: { input: { collectionSlug: string; docId: string }; req: any }) => {
     try {
+      // Check cancellation before processing
+      try {
+        const state = await req.payload.findGlobal({ slug: GLOBAL_SLUG })
+        const collState = (state?.collections as Record<string, any>)?.[input.collectionSlug]
+        if (collState?.cancelledAt && collState.cancelledAt > (collState.startedAt || 0)) {
+          return { output: { status: 'cancelled', reason: 'user-cancelled' } }
+        }
+      } catch {
+        // Global may not exist yet — proceed normally
+      }
+
       const doc = await req.payload.findByID({
         collection: input.collectionSlug as CollectionSlug,
         id: input.docId,
@@ -75,11 +87,19 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
       if (cloudStorage) {
         // Cloud storage: re-upload the optimized file via Payload's update API.
         // This triggers the cloud adapter's afterChange hook which uploads to cloud.
-        // When uniqueFileNames is enabled, generate a new UUID filename to avoid
+        // When a filename strategy is configured, generate a new filename to avoid
         // Vercel Blob "already exists" errors (the adapter doesn't support allowOverwrite).
-        if (resolvedConfig.uniqueFileNames) {
+        if (resolvedConfig.generateFilename) {
           const ext = path.extname(newFilename)
-          newFilename = `${crypto.randomUUID()}${ext}`
+          const stem = resolvedConfig.generateFilename({
+            altText: doc.alt as string | undefined,
+            originalFilename: safeFilename,
+            mimeType: doc.mimeType as string,
+            collectionSlug: input.collectionSlug,
+            // No existingFilename — regeneration should always create a fresh name
+            // to avoid cloud storage "already exists" errors
+          })
+          newFilename = `${stem}${ext}`
         }
 
         const updateData: Record<string, any> = {

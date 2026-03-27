@@ -1,4 +1,36 @@
 import { waitUntil } from '../utilities/waitUntil.js';
+const GLOBAL_SLUG = 'image-optimizer-state';
+async function getCollectionState(payload, slug) {
+    try {
+        const state = await payload.findGlobal({
+            slug: GLOBAL_SLUG
+        });
+        return state?.collections?.[slug] || {};
+    } catch  {
+        return {};
+    }
+}
+async function setCollectionState(payload, slug, update) {
+    let existing = {};
+    try {
+        const state = await payload.findGlobal({
+            slug: GLOBAL_SLUG
+        });
+        existing = state?.collections || {};
+    } catch  {
+    // Global may not exist yet
+    }
+    existing[slug] = {
+        ...existing[slug],
+        ...update
+    };
+    await payload.updateGlobal({
+        slug: GLOBAL_SLUG,
+        data: {
+            collections: existing
+        }
+    });
+}
 export const createRegenerateHandler = (resolvedConfig)=>{
     const handler = async (req)=>{
         if (!req.user) {
@@ -91,6 +123,12 @@ export const createRegenerateHandler = (resolvedConfig)=>{
             }
         }
         req.payload.logger.info(`Image optimizer: queued ${queued} images from '${collectionSlug}' for regeneration`);
+        // Clear any previous cancellation and record the start time + batch size
+        await setCollectionState(req.payload, collectionSlug, {
+            startedAt: Date.now(),
+            cancelledAt: undefined,
+            queued
+        });
         // Fire the job runner — use waitUntil to keep the serverless function alive
         // after the response is sent, so jobs actually complete on Vercel/serverless.
         if (queued > 0) {
@@ -159,12 +197,50 @@ export const createRegenerateStatusHandler = (resolvedConfig)=>{
                 }
             }
         });
+        // Include cancellation state so the UI can react
+        const collState = await getCollectionState(req.payload, collectionSlug);
+        const cancelled = !!(collState.cancelledAt && collState.startedAt && collState.cancelledAt > collState.startedAt);
         return Response.json({
             collectionSlug,
             total: total.totalDocs,
             complete: complete.totalDocs,
             errored: errored.totalDocs,
-            pending: total.totalDocs - complete.totalDocs - errored.totalDocs
+            pending: total.totalDocs - complete.totalDocs - errored.totalDocs,
+            cancelled
+        });
+    };
+    return handler;
+};
+export const createCancelHandler = (resolvedConfig)=>{
+    const handler = async (req)=>{
+        if (!req.user) {
+            return Response.json({
+                error: 'Unauthorized'
+            }, {
+                status: 401
+            });
+        }
+        let body;
+        try {
+            body = await req.json();
+        } catch  {
+            body = {};
+        }
+        const collectionSlug = body.collectionSlug;
+        if (!collectionSlug || !resolvedConfig.collections[collectionSlug]) {
+            return Response.json({
+                error: 'Invalid or unconfigured collection slug'
+            }, {
+                status: 400
+            });
+        }
+        await setCollectionState(req.payload, collectionSlug, {
+            cancelledAt: Date.now()
+        });
+        req.payload.logger.info(`Image optimizer: cancellation requested for '${collectionSlug}'`);
+        return Response.json({
+            cancelled: true,
+            collectionSlug
         });
     };
     return handler;

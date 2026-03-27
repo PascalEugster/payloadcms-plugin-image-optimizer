@@ -16,6 +16,7 @@ export const RegenerationButton = ()=>{
     const [force, setForce] = useState(false);
     const [error, setError] = useState(null);
     const [stalled, setStalled] = useState(false);
+    const [cancelled, setCancelled] = useState(false);
     const [collectionSlug, setCollectionSlug] = useState(null);
     const [stats, setStats] = useState(null);
     const [confirming, setConfirming] = useState(false);
@@ -24,6 +25,9 @@ export const RegenerationButton = ()=>{
         lastProcessed: 0,
         stallCount: 0
     });
+    // Snapshot of complete+errored at the moment regeneration starts,
+    // so we can compute batch-relative progress for selective regeneration.
+    const baselineRef = useRef(null);
     const prevIsRunningRef = useRef(false);
     // Extract collection slug from URL after mount to avoid hydration mismatch
     useEffect(()=>{
@@ -65,6 +69,15 @@ export const RegenerationButton = ()=>{
             if (res.ok) {
                 const data = await res.json();
                 setProgress(data);
+                // Stop polling if server reports cancellation
+                if (data.cancelled) {
+                    setCancelled(true);
+                    setIsRunning(false);
+                    setStalled(false);
+                    stopPolling();
+                    sessionStorage.removeItem(SESSION_KEY);
+                    return;
+                }
                 // Stop polling when no more pending
                 if (data.pending <= 0) {
                     setIsRunning(false);
@@ -158,12 +171,35 @@ export const RegenerationButton = ()=>{
     const handleCancel = ()=>{
         setConfirming(false);
     };
+    const handleStop = async ()=>{
+        if (!collectionSlug) return;
+        try {
+            await fetch('/api/image-optimizer/regenerate', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    collectionSlug
+                })
+            });
+            setCancelled(true);
+            setIsRunning(false);
+            setStalled(false);
+            stopPolling();
+            sessionStorage.removeItem(SESSION_KEY);
+            fetchStats();
+        } catch  {
+        // ignore cancel errors
+        }
+    };
     // Phase 2: Actually start regeneration (after user confirms)
     const handleConfirm = async ()=>{
         if (!collectionSlug) return;
         setConfirming(false);
         setError(null);
         setStalled(false);
+        setCancelled(false);
         setIsRunning(true);
         setQueued(null);
         setProgress(null);
@@ -171,6 +207,8 @@ export const RegenerationButton = ()=>{
             lastProcessed: 0,
             stallCount: 0
         };
+        // Capture current complete+errored as baseline before new jobs run
+        baselineRef.current = stats ? stats.complete + stats.errored : 0;
         try {
             const requestBody = {
                 collectionSlug,
@@ -212,7 +250,13 @@ export const RegenerationButton = ()=>{
         stopPolling
     ]);
     if (!collectionSlug) return null;
-    const progressPercent = progress && progress.total > 0 ? Math.round((progress.complete + progress.errored) / progress.total * 100) : 0;
+    // When a batch is running, compute progress relative to the queued count
+    // (not the total collection) so selective regeneration shows e.g. 1/2, not 1/167.
+    const batchTotal = queued ?? progress?.total ?? 0;
+    const batchProcessed = progress ? progress.complete + progress.errored - (baselineRef.current ?? 0) : 0;
+    const batchComplete = progress ? progress.complete - Math.max((baselineRef.current ?? 0) - progress.errored, 0) : 0;
+    const batchErrored = progress ? Math.max(batchProcessed - Math.max(batchComplete, 0), 0) : 0;
+    const progressPercent = batchTotal > 0 ? Math.min(Math.round(batchProcessed / batchTotal * 100), 100) : 0;
     const showProgressBar = isRunning && progress || stalled && progress;
     // Stats computations
     const statsPercent = stats && stats.total > 0 ? Math.round(stats.complete / stats.total * 100) : 0;
@@ -227,20 +271,33 @@ export const RegenerationButton = ()=>{
             flexWrap: 'wrap'
         },
         children: [
-            !confirming && /*#__PURE__*/ _jsx("button", {
+            !confirming && !isRunning && /*#__PURE__*/ _jsx("button", {
                 onClick: handlePreflight,
-                disabled: isRunning,
                 style: {
-                    backgroundColor: isRunning ? '#9ca3af' : '#4f46e5',
+                    backgroundColor: '#4f46e5',
                     color: '#fff',
                     border: 'none',
                     borderRadius: '6px',
                     padding: '8px 16px',
                     fontSize: '14px',
                     fontWeight: 500,
-                    cursor: isRunning ? 'not-allowed' : 'pointer'
+                    cursor: 'pointer'
                 },
-                children: isRunning ? 'Processing images...' : hasSelection ? `Regenerate ${selectionCount} Selected` : 'Regenerate All Images'
+                children: hasSelection ? `Regenerate ${selectionCount} Selected` : 'Regenerate All Images'
+            }),
+            !confirming && isRunning && /*#__PURE__*/ _jsx("button", {
+                onClick: handleStop,
+                style: {
+                    backgroundColor: '#ef4444',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    cursor: 'pointer'
+                },
+                children: "Stop Processing"
             }),
             confirming && stats && /*#__PURE__*/ _jsxs("div", {
                 style: {
@@ -323,12 +380,19 @@ export const RegenerationButton = ()=>{
                     " for processing"
                 ]
             }),
-            queued === 0 && !isRunning && !stalled && !confirming && /*#__PURE__*/ _jsx("span", {
+            queued === 0 && !isRunning && !stalled && !confirming && !cancelled && /*#__PURE__*/ _jsx("span", {
                 style: {
                     color: '#10b981',
                     fontSize: '13px'
                 },
                 children: "All images already optimized."
+            }),
+            cancelled && !isRunning && !confirming && /*#__PURE__*/ _jsx("span", {
+                style: {
+                    color: '#f59e0b',
+                    fontSize: '13px'
+                },
+                children: "Processing cancelled."
             }),
             stalled && progress && /*#__PURE__*/ _jsxs("span", {
                 style: {
@@ -359,18 +423,18 @@ export const RegenerationButton = ()=>{
                         children: [
                             /*#__PURE__*/ _jsxs("span", {
                                 children: [
-                                    progress.complete,
+                                    Math.max(batchProcessed, 0),
                                     " / ",
-                                    progress.total,
+                                    batchTotal,
                                     " complete"
                                 ]
                             }),
-                            progress.errored > 0 && /*#__PURE__*/ _jsxs("span", {
+                            batchErrored > 0 && /*#__PURE__*/ _jsxs("span", {
                                 style: {
                                     color: '#ef4444'
                                 },
                                 children: [
-                                    progress.errored,
+                                    batchErrored,
                                     " errors"
                                 ]
                             }),
@@ -394,15 +458,15 @@ export const RegenerationButton = ()=>{
                             /*#__PURE__*/ _jsx("div", {
                                 style: {
                                     height: '100%',
-                                    width: `${progress.total > 0 ? Math.round(progress.complete / progress.total * 100) : 0}%`,
+                                    width: `${batchTotal > 0 ? Math.min(Math.round((batchProcessed - batchErrored) / batchTotal * 100), 100) : 0}%`,
                                     backgroundColor: '#10b981',
                                     transition: 'width 0.3s ease'
                                 }
                             }),
-                            progress.errored > 0 && /*#__PURE__*/ _jsx("div", {
+                            batchErrored > 0 && /*#__PURE__*/ _jsx("div", {
                                 style: {
                                     height: '100%',
-                                    width: `${progress.total > 0 ? Math.round(progress.errored / progress.total * 100) : 0}%`,
+                                    width: `${batchTotal > 0 ? Math.round(batchErrored / batchTotal * 100) : 0}%`,
                                     backgroundColor: '#ef4444',
                                     transition: 'width 0.3s ease'
                                 }
@@ -411,30 +475,30 @@ export const RegenerationButton = ()=>{
                     })
                 ]
             }),
-            !isRunning && !stalled && progress && progress.complete > 0 && queued !== 0 && !confirming && /*#__PURE__*/ _jsxs("span", {
+            !isRunning && !stalled && !cancelled && progress && batchProcessed > 0 && queued !== 0 && !confirming && /*#__PURE__*/ _jsxs("span", {
                 style: {
                     fontSize: '13px'
                 },
                 children: [
                     /*#__PURE__*/ _jsxs("span", {
                         style: {
-                            color: progress.errored > 0 ? '#f59e0b' : '#10b981'
+                            color: batchErrored > 0 ? '#f59e0b' : '#10b981'
                         },
                         children: [
                             "Done! ",
-                            progress.complete,
+                            Math.max(batchProcessed - batchErrored, 0),
                             "/",
-                            progress.total,
-                            " optimized (across entire collection)."
+                            batchTotal,
+                            " optimized."
                         ]
                     }),
-                    progress.errored > 0 && /*#__PURE__*/ _jsxs("span", {
+                    batchErrored > 0 && /*#__PURE__*/ _jsxs("span", {
                         style: {
                             color: '#ef4444'
                         },
                         children: [
                             ' ',
-                            progress.errored,
+                            batchErrored,
                             " failed."
                         ]
                     })

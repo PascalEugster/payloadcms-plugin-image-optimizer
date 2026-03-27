@@ -3,7 +3,7 @@ import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import path from 'path'
 import { buildConfig } from 'payload'
-import { imageOptimizer } from '@inoo-ch/payload-image-optimizer'
+import { imageOptimizer, seoFilename } from '@inoo-ch/payload-image-optimizer'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 
@@ -42,7 +42,9 @@ const buildConfigWithMemoryDB = async () => {
       },
       {
         slug: 'media',
-        fields: [],
+        fields: [
+          { name: 'alt', type: 'text' },
+        ],
         upload: {
           staticDir: path.resolve(dirname, 'media'),
         },
@@ -81,7 +83,7 @@ const buildConfigWithMemoryDB = async () => {
         maxDimensions: { width: 2560, height: 2560 },
         stripMetadata: true,
         generateThumbHash: true,
-        // uniqueFileNames: true,
+        generateFilename: seoFilename,
       }),
     ],
     secret: process.env.PAYLOAD_SECRET || 'test-secret_key',

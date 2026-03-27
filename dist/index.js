@@ -6,9 +6,10 @@ import { createBeforeChangeHook } from './hooks/beforeChange.js';
 import { createAfterChangeHook } from './hooks/afterChange.js';
 import { createConvertFormatsHandler } from './tasks/convertFormats.js';
 import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js';
-import { createRegenerateHandler, createRegenerateStatusHandler } from './endpoints/regenerate.js';
+import { createRegenerateHandler, createRegenerateStatusHandler, createCancelHandler } from './endpoints/regenerate.js';
 export { defaultImageOptimizerFields } from './fields/imageOptimizerField.js';
 export { encodeImageToThumbHash, decodeThumbHashToDataURL } from './utilities/thumbhash.js';
+export { uuidFilename, seoFilename } from './utilities/filenameStrategies.js';
 /**
  * Recommended maxDuration for the Payload API route on Vercel.
  * Re-export this in your route file:
@@ -58,10 +59,12 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                                 Upload: '@inoo-ch/payload-image-optimizer/client#UploadOptimizer'
                             }
                         } : {},
-                        beforeListTable: [
-                            ...collection.admin?.components?.beforeListTable || [],
-                            '@inoo-ch/payload-image-optimizer/client#RegenerationButton'
-                        ]
+                        ...resolvedConfig.regenerateButton ? {
+                            beforeListTable: [
+                                ...collection.admin?.components?.beforeListTable || [],
+                                '@inoo-ch/payload-image-optimizer/client#RegenerationButton'
+                            ]
+                        } : {}
                     }
                 }
             };
@@ -81,6 +84,25 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
         return {
             ...config,
             collections,
+            globals: [
+                ...config.globals || [],
+                {
+                    slug: 'image-optimizer-state',
+                    admin: {
+                        hidden: true
+                    },
+                    access: {
+                        read: ()=>true,
+                        update: ()=>true
+                    },
+                    fields: [
+                        {
+                            name: 'collections',
+                            type: 'json'
+                        }
+                    ]
+                }
+            ],
             i18n,
             jobs: {
                 ...config.jobs,
@@ -149,6 +171,11 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                     path: '/image-optimizer/regenerate',
                     method: 'get',
                     handler: createRegenerateStatusHandler(resolvedConfig)
+                },
+                {
+                    path: '/image-optimizer/regenerate',
+                    method: 'delete',
+                    handler: createCancelHandler(resolvedConfig)
                 }
             ]
         };

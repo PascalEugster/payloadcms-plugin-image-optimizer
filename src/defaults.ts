@@ -1,6 +1,19 @@
 import type { CollectionSlug } from 'payload'
 
 import type { ImageOptimizerConfig, ResolvedCollectionOptimizerConfig, ResolvedImageOptimizerConfig } from './types.js'
+import { uuidFilename } from './utilities/filenameStrategies.js'
+
+/**
+ * Resolve the generateFilename option:
+ * - Explicit `generateFilename` callback takes priority
+ * - `uniqueFileNames: true` maps to `uuidFilename` for backwards compat
+ * - Otherwise undefined (keep original filename)
+ */
+const resolveGenerateFilename = (config: ImageOptimizerConfig) => {
+  if (config.generateFilename) return config.generateFilename
+  if (config.uniqueFileNames) return uuidFilename
+  return undefined
+}
 
 export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimizerConfig => ({
   clientOptimization: config.clientOptimization ?? true,
@@ -9,11 +22,12 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   formats: config.formats ?? [
     { format: 'webp', quality: 80 },
   ],
+  generateFilename: resolveGenerateFilename(config),
   generateThumbHash: config.generateThumbHash ?? true,
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
+  regenerateButton: config.regenerateButton ?? true,
   replaceOriginal: config.replaceOriginal ?? true,
   stripMetadata: config.stripMetadata ?? true,
-  uniqueFileNames: config.uniqueFileNames ?? false,
 })
 
 export const resolveCollectionConfig = (
