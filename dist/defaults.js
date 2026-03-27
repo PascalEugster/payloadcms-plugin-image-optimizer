@@ -14,7 +14,8 @@ export const resolveConfig = (config)=>({
             height: 2560
         },
         replaceOriginal: config.replaceOriginal ?? true,
-        stripMetadata: config.stripMetadata ?? true
+        stripMetadata: config.stripMetadata ?? true,
+        uniqueFileNames: config.uniqueFileNames ?? false
     });
 export const resolveCollectionConfig = (resolvedConfig, collectionSlug)=>{
     const collectionValue = resolvedConfig.collections[collectionSlug];

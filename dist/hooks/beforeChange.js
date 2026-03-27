@@ -1,11 +1,31 @@
+import crypto from 'crypto';
 import path from 'path';
 import { resolveCollectionConfig } from '../defaults.js';
 import { convertFormat, generateThumbHash, stripAndResize } from '../processing/index.js';
 import { isCloudStorage } from '../utilities/storage.js';
 export const createBeforeChangeHook = (resolvedConfig, collectionSlug)=>{
-    return async ({ context, data, req })=>{
+    return async ({ context, data, originalDoc, req })=>{
         if (context?.imageOptimizer_skip) return data;
         if (!req.file || !req.file.data || !req.file.mimetype?.startsWith('image/')) return data;
+        // Rename file to UUID before any processing, so the storage adapter
+        // never sees the original filename. Prevents Vercel Blob "already exists"
+        // errors and avoids leaking original filenames to storage.
+        // On focal-point or crop re-uploads (where Payload re-sends the same file),
+        // reuse the existing UUID filename to avoid unnecessary file churn and
+        // broken previews.
+        if (resolvedConfig.uniqueFileNames) {
+            const existingFilename = originalDoc?.filename;
+            if (existingFilename) {
+                // Reuse the existing filename (may get a new extension below if replaceOriginal changes format)
+                req.file.name = existingFilename;
+                data.filename = existingFilename;
+            } else {
+                const ext = path.extname(req.file.name);
+                const uuid = crypto.randomUUID();
+                req.file.name = `${uuid}${ext}`;
+                data.filename = req.file.name;
+            }
+        }
         const originalSize = req.file.data.length;
         const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug);
         // Process in memory: strip EXIF, resize, generate blur

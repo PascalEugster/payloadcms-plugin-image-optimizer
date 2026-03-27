@@ -1,12 +1,15 @@
 'use client';
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSelection } from '@payloadcms/ui';
 const POLL_INTERVAL_MS = 2000;
 // With sequential processing each image takes ~4-5s, so no progress for 30s
 // (15 polls) strongly suggests a real stall rather than slow processing.
 const STALL_THRESHOLD = 15;
 const SESSION_KEY = 'imageOptimizer_running';
 export const RegenerationButton = ()=>{
+    const { count: selectionCount, getSelectedIds } = useSelection();
+    const hasSelection = selectionCount > 0;
     const [isRunning, setIsRunning] = useState(false);
     const [progress, setProgress] = useState(null);
     const [queued, setQueued] = useState(null);
@@ -169,15 +172,19 @@ export const RegenerationButton = ()=>{
             stallCount: 0
         };
         try {
+            const requestBody = {
+                collectionSlug,
+                force
+            };
+            if (hasSelection) {
+                requestBody.docIds = getSelectedIds().map(String);
+            }
             const res = await fetch('/api/image-optimizer/regenerate', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    collectionSlug,
-                    force
-                })
+                body: JSON.stringify(requestBody)
             });
             if (!res.ok) {
                 const data = await res.json();
@@ -233,7 +240,7 @@ export const RegenerationButton = ()=>{
                     fontWeight: 500,
                     cursor: isRunning ? 'not-allowed' : 'pointer'
                 },
-                children: isRunning ? 'Processing all images...' : 'Regenerate All Images'
+                children: isRunning ? 'Processing images...' : hasSelection ? `Regenerate ${selectionCount} Selected` : 'Regenerate All Images'
             }),
             confirming && stats && /*#__PURE__*/ _jsxs("div", {
                 style: {
@@ -247,7 +254,7 @@ export const RegenerationButton = ()=>{
                             fontSize: '13px',
                             color: '#374151'
                         },
-                        children: force ? `Re-process all ${stats.total} images across the entire collection?` : `Regenerate ${stats.pending} unoptimized image${stats.pending !== 1 ? 's' : ''} across the entire collection?`
+                        children: hasSelection ? `Regenerate ${selectionCount} selected image${selectionCount !== 1 ? 's' : ''}?` : force ? `Re-process all ${stats.total} images across the entire collection?` : `Regenerate ${stats.pending} unoptimized image${stats.pending !== 1 ? 's' : ''} across the entire collection?`
                     }),
                     /*#__PURE__*/ _jsx("button", {
                         onClick: handleConfirm,
@@ -313,7 +320,7 @@ export const RegenerationButton = ()=>{
                     queued,
                     " image",
                     queued !== 1 ? 's' : '',
-                    " for processing across the entire collection"
+                    " for processing"
                 ]
             }),
             queued === 0 && !isRunning && !stalled && !confirming && /*#__PURE__*/ _jsx("span", {

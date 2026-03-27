@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { resolveCollectionConfig } from '../defaults.js';
@@ -52,6 +53,12 @@ export const createRegenerateDocumentHandler = (resolvedConfig)=>{
             if (cloudStorage) {
                 // Cloud storage: re-upload the optimized file via Payload's update API.
                 // This triggers the cloud adapter's afterChange hook which uploads to cloud.
+                // When uniqueFileNames is enabled, generate a new UUID filename to avoid
+                // Vercel Blob "already exists" errors (the adapter doesn't support allowOverwrite).
+                if (resolvedConfig.uniqueFileNames) {
+                    const ext = path.extname(newFilename);
+                    newFilename = `${crypto.randomUUID()}${ext}`;
+                }
                 const updateData = {
                     imageOptimizer: {
                         originalSize,
