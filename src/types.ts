@@ -25,6 +25,10 @@ export type ImageOptimizerConfig = {
   maxDimensions?: { width: number; height: number }
   replaceOriginal?: boolean
   stripMetadata?: boolean
+  /** Replace original filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`).
+   * Prevents Vercel Blob "already exists" errors and avoids leaking original filenames.
+   * Defaults to `false`. */
+  uniqueFileNames?: boolean
 }
 
 export type ResolvedCollectionOptimizerConfig = {
@@ -40,6 +44,7 @@ export type ResolvedImageOptimizerConfig = Required<
   collections: ImageOptimizerConfig['collections']
   disabled: boolean
   replaceOriginal: boolean
+  uniqueFileNames: boolean
 }
 
 export type ImageOptimizerData = {

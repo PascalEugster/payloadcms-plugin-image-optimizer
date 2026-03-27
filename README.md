@@ -102,6 +102,7 @@ imageOptimizer({
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions. Images are resized to fit within these bounds. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholders for instant image previews. |
 | `stripMetadata` | `boolean` | `true` | Remove EXIF and other metadata from images. |
+| `uniqueFileNames` | `boolean` | `false` | Replace filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`). Prevents Vercel Blob "already exists" errors. |
 | `clientOptimization` | `boolean` | `true` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
 | `disabled` | `boolean` | `false` | Disable optimization while keeping schema fields intact. |
 
@@ -187,18 +188,27 @@ With `clientUploads: true`, files upload directly from the browser to Vercel Blo
 
 When `replaceOriginal: true` (default), the plugin changes filenames during upload (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass [`allowOverwrite`](https://vercel.com/docs/vercel-blob#overwriting-blobs) to the Vercel Blob SDK.
 
-**Workaround:** Set `addRandomSuffix: true` on the storage adapter to prevent filename collisions:
+**Fix:** Enable `uniqueFileNames` in the plugin config — replaces original filenames with UUIDs before the storage adapter sees them:
+
+```ts
+imageOptimizer({
+  collections: { media: true },
+  uniqueFileNames: true, // photo.jpg → a1b2c3d4-5e6f-7890-abcd-ef1234567890.webp
+})
+```
+
+This prevents collisions entirely and avoids leaking original filenames to blob storage. Payload stores the full URL in the database, so UUID filenames are transparent to your application.
+
+**Alternative:** If you prefer to keep original filenames, set `addRandomSuffix: true` on the storage adapter instead:
 
 ```ts
 vercelBlobStorage({
   collections: { media: true },
   token: process.env.BLOB_READ_WRITE_TOKEN,
   clientUploads: true,
-  addRandomSuffix: true, // prevents "blob already exists" errors
+  addRandomSuffix: true,
 })
 ```
-
-This adds a unique suffix to every uploaded file (e.g., `photo-oYnXSVcz.webp`), avoiding collisions entirely. The trade-off is less predictable URLs, but since Payload stores the full URL in the database, this is transparent to your application.
 
 ## How It Differs from Payload's Default Image Handling
 

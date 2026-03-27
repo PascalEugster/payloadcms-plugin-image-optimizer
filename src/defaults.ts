@@ -13,6 +13,7 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
   replaceOriginal: config.replaceOriginal ?? true,
   stripMetadata: config.stripMetadata ?? true,
+  uniqueFileNames: config.uniqueFileNames ?? false,
 })
 
 export const resolveCollectionConfig = (

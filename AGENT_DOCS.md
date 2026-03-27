@@ -70,6 +70,7 @@ imageOptimizer({
 | `formats` | `{ format: 'webp' \| 'avif', quality: number }[]` | `[{ format: 'webp', quality: 80 }]` | Output formats to generate. |
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions (fit inside, no upscaling). |
 | `stripMetadata` | `boolean` | `true` | Strip EXIF, ICC, XMP metadata. |
+| `uniqueFileNames` | `boolean` | `false` | Replace filenames with UUIDs. Prevents Vercel Blob collisions and hides original filenames. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholder. |
 | `replaceOriginal` | `boolean` | `true` | Replace the original file with the primary format. |
 | `clientOptimization` | `boolean` | `true` | Pre-resize images in browser via Canvas API before upload. Reduces upload size 90%+ for large images. |
@@ -466,14 +467,23 @@ vercelBlobStorage({
 
 When `replaceOriginal: true` (default), the plugin changes filenames (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass `allowOverwrite` to the Vercel Blob SDK.
 
-**Fix:** Set `addRandomSuffix: true` on the storage adapter:
+**Fix (recommended):** Enable `uniqueFileNames` in the plugin config — replaces filenames with UUIDs before the storage adapter sees them:
+
+```ts
+imageOptimizer({
+  collections: { media: true },
+  uniqueFileNames: true, // photo.jpg → a1b2c3d4-5e6f-7890-abcd-ef1234567890.webp
+})
+```
+
+**Alternative:** Set `addRandomSuffix: true` on the storage adapter:
 
 ```ts
 vercelBlobStorage({
   collections: { media: true },
   token: process.env.BLOB_READ_WRITE_TOKEN,
   clientUploads: true,
-  addRandomSuffix: true, // prevents "blob already exists" errors
+  addRandomSuffix: true,
 })
 ```
 

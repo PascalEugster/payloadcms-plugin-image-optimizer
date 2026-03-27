@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import path from 'path'
 import type { CollectionBeforeChangeHook } from 'payload'
 
@@ -14,6 +15,16 @@ export const createBeforeChangeHook = (
     if (context?.imageOptimizer_skip) return data
 
     if (!req.file || !req.file.data || !req.file.mimetype?.startsWith('image/')) return data
+
+    // Rename file to UUID before any processing, so the storage adapter
+    // never sees the original filename. Prevents Vercel Blob "already exists"
+    // errors and avoids leaking original filenames to storage.
+    if (resolvedConfig.uniqueFileNames) {
+      const ext = path.extname(req.file.name)
+      const uuid = crypto.randomUUID()
+      req.file.name = `${uuid}${ext}`
+      data.filename = req.file.name
+    }
 
     const originalSize = req.file.data.length
 
