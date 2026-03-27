@@ -102,7 +102,7 @@ imageOptimizer({
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions. Images are resized to fit within these bounds. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholders for instant image previews. |
 | `stripMetadata` | `boolean` | `true` | Remove EXIF and other metadata from images. |
-| `uniqueFileNames` | `boolean` | `false` | Replace filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`). Prevents Vercel Blob "already exists" errors. |
+| `uniqueFileNames` | `boolean` | `false` | Replace filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`). Prevents Vercel Blob "already exists" errors on uploads and regeneration. |
 | `clientOptimization` | `boolean` | `true` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
 | `disabled` | `boolean` | `false` | Disable optimization while keeping schema fields intact. |
 
@@ -197,7 +197,7 @@ imageOptimizer({
 })
 ```
 
-This prevents collisions entirely and avoids leaking original filenames to blob storage. Payload stores the full URL in the database, so UUID filenames are transparent to your application.
+This prevents collisions on both initial uploads and bulk regeneration (the regeneration task also generates a new UUID for cloud storage re-uploads). Payload stores the full URL in the database, so UUID filenames are transparent to your application.
 
 **Alternative:** If you prefer to keep original filenames, set `addRandomSuffix: true` on the storage adapter instead:
 

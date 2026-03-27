@@ -60,6 +60,7 @@ imageOptimizer({
   generateThumbHash: true,                          // generate blur placeholders
   replaceOriginal: true,                            // convert main file to primary format
   clientOptimization: true,                         // pre-resize in browser before upload
+  uniqueFileNames: false,                           // replace filenames with UUIDs
   disabled: false,                                  // keep fields but skip all processing
 })
 ```
@@ -98,6 +99,7 @@ collections: {
 When an image is uploaded to an optimized collection:
 
 1. **`beforeChange` hook** (in-memory processing):
+   - If `uniqueFileNames: true`: renames file to UUID (e.g., `photo.jpg` → `a1b2c3d4.jpg`)
    - Auto-rotates based on EXIF orientation
    - Resizes to fit within `maxDimensions`
    - Strips metadata (if enabled)
@@ -120,6 +122,7 @@ When an image is uploaded to an optimized collection:
 | File | Naming Pattern | Example |
 |------|---------------|---------|
 | Main file (replaceOriginal) | `{name}.{primaryFormat}` | `photo.webp` |
+| Main file (uniqueFileNames) | `{uuid}.{primaryFormat}` | `a1b2c3d4-5e6f-7890.webp` |
 | Variant files | `{name}-optimized.{format}` | `photo-optimized.avif` |
 
 ### Format Behavior
@@ -467,7 +470,7 @@ vercelBlobStorage({
 
 When `replaceOriginal: true` (default), the plugin changes filenames (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass `allowOverwrite` to the Vercel Blob SDK.
 
-**Fix (recommended):** Enable `uniqueFileNames` in the plugin config — replaces filenames with UUIDs before the storage adapter sees them:
+**Fix (recommended):** Enable `uniqueFileNames` in the plugin config — replaces filenames with UUIDs before the storage adapter sees them. This fixes both initial uploads AND regeneration (the regeneration task also generates a new UUID for cloud storage re-uploads):
 
 ```ts
 imageOptimizer({
@@ -476,7 +479,7 @@ imageOptimizer({
 })
 ```
 
-**Alternative:** Set `addRandomSuffix: true` on the storage adapter:
+**Alternative:** Set `addRandomSuffix: true` on the storage adapter (only fixes initial uploads, not regeneration):
 
 ```ts
 vercelBlobStorage({
