@@ -10,7 +10,7 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    let body: { collectionSlug?: string; force?: boolean }
+    let body: { collectionSlug?: string; force?: boolean; docIds?: string[] }
     try {
       body = await req.json!()
     } catch {
@@ -25,49 +25,64 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
       )
     }
 
-    // Find all image documents in the collection
-    // Unless force=true, skip already-processed docs
-    const where: Where = body.force
-      ? { mimeType: { contains: 'image/' } }
-      : {
-          and: [
-            { mimeType: { contains: 'image/' } },
-            {
-              or: [
-                { 'imageOptimizer.status': { not_equals: 'complete' } },
-                { 'imageOptimizer.status': { exists: false } },
-              ],
-            },
-          ],
-        }
-
     let queued = 0
-    let page = 1
-    let hasMore = true
 
-    while (hasMore) {
-      const result = await req.payload.find({
-        collection: collectionSlug as CollectionSlug,
-        limit: 50,
-        page,
-        depth: 0,
-        where,
-        sort: 'createdAt',
-      })
-
-      for (const doc of result.docs) {
+    if (body.docIds && body.docIds.length > 0) {
+      // Regenerate specific documents by ID
+      for (const docId of body.docIds) {
         await req.payload.jobs.queue({
           task: 'imageOptimizer_regenerateDocument',
           input: {
             collectionSlug,
-            docId: String(doc.id),
+            docId: String(docId),
           },
         })
         queued++
       }
+    } else {
+      // Find all image documents in the collection
+      // Unless force=true, skip already-processed docs
+      const where: Where = body.force
+        ? { mimeType: { contains: 'image/' } }
+        : {
+            and: [
+              { mimeType: { contains: 'image/' } },
+              {
+                or: [
+                  { 'imageOptimizer.status': { not_equals: 'complete' } },
+                  { 'imageOptimizer.status': { exists: false } },
+                ],
+              },
+            ],
+          }
 
-      hasMore = result.hasNextPage
-      page++
+      let page = 1
+      let hasMore = true
+
+      while (hasMore) {
+        const result = await req.payload.find({
+          collection: collectionSlug as CollectionSlug,
+          limit: 50,
+          page,
+          depth: 0,
+          where,
+          sort: 'createdAt',
+        })
+
+        for (const doc of result.docs) {
+          await req.payload.jobs.queue({
+            task: 'imageOptimizer_regenerateDocument',
+            input: {
+              collectionSlug,
+              docId: String(doc.id),
+            },
+          })
+          queued++
+        }
+
+        hasMore = result.hasNextPage
+        page++
+      }
     }
 
     req.payload.logger.info(`Image optimizer: queued ${queued} images from '${collectionSlug}' for regeneration`)

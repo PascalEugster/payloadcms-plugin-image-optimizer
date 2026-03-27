@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useSelection } from '@payloadcms/ui'
 
 type RegenerationProgress = {
   total: number
@@ -16,6 +17,8 @@ const STALL_THRESHOLD = 15
 const SESSION_KEY = 'imageOptimizer_running'
 
 export const RegenerationButton: React.FC = () => {
+  const { count: selectionCount, getSelectedIds } = useSelection()
+  const hasSelection = selectionCount > 0
   const [isRunning, setIsRunning] = useState(false)
   const [progress, setProgress] = useState<RegenerationProgress | null>(null)
   const [queued, setQueued] = useState<number | null>(null)
@@ -178,10 +181,15 @@ export const RegenerationButton: React.FC = () => {
     stallRef.current = { lastProcessed: 0, stallCount: 0 }
 
     try {
+      const requestBody: Record<string, unknown> = { collectionSlug, force }
+      if (hasSelection) {
+        requestBody.docIds = getSelectedIds().map(String)
+      }
+
       const res = await fetch('/api/image-optimizer/regenerate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ collectionSlug, force }),
+        body: JSON.stringify(requestBody),
       })
 
       if (!res.ok) {
@@ -254,16 +262,22 @@ export const RegenerationButton: React.FC = () => {
             cursor: isRunning ? 'not-allowed' : 'pointer',
           }}
         >
-          {isRunning ? 'Processing all images...' : 'Regenerate All Images'}
+          {isRunning
+            ? 'Processing images...'
+            : hasSelection
+              ? `Regenerate ${selectionCount} Selected`
+              : 'Regenerate All Images'}
         </button>
       )}
 
       {confirming && stats && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '13px', color: '#374151' }}>
-            {force
-              ? `Re-process all ${stats.total} images across the entire collection?`
-              : `Regenerate ${stats.pending} unoptimized image${stats.pending !== 1 ? 's' : ''} across the entire collection?`}
+            {hasSelection
+              ? `Regenerate ${selectionCount} selected image${selectionCount !== 1 ? 's' : ''}?`
+              : force
+                ? `Re-process all ${stats.total} images across the entire collection?`
+                : `Regenerate ${stats.pending} unoptimized image${stats.pending !== 1 ? 's' : ''} across the entire collection?`}
           </span>
           <button
             onClick={handleConfirm}
@@ -318,7 +332,7 @@ export const RegenerationButton: React.FC = () => {
 
       {queued !== null && queued > 0 && isRunning && !confirming && (
         <span style={{ color: '#4f46e5', fontSize: '13px' }}>
-          Queued {queued} image{queued !== 1 ? 's' : ''} for processing across the entire collection
+          Queued {queued} image{queued !== 1 ? 's' : ''} for processing
         </span>
       )}
 
