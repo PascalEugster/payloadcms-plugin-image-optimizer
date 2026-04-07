@@ -6,6 +6,9 @@ import { waitUntil } from '../utilities/waitUntil.js';
 export const createAfterChangeHook = (resolvedConfig, collectionSlug)=>{
     return async ({ context, doc, req })=>{
         if (context?.imageOptimizer_skip) return doc;
+        // Native re-uploads (focal point/crop changes): optimization was skipped in beforeChange.
+        // Payload's native image-size regeneration handles everything.
+        if (context?.imageOptimizer_nativeReupload) return doc;
         // Use context flag from beforeChange instead of checking req.file.data directly.
         // Cloud storage adapters may consume req.file.data in their own afterChange hook
         // before ours runs, which would cause this guard to bail out and leave status as 'pending'.

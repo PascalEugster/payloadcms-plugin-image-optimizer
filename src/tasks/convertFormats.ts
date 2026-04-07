@@ -5,7 +5,7 @@ import type { CollectionSlug } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveCollectionConfig } from '../defaults.js'
-import { convertFormat } from '../processing/index.js'
+import { convertFormat, generateThumbHash } from '../processing/index.js'
 import { resolveStaticDir } from '../utilities/resolveStaticDir.js'
 import { fetchFileBuffer, isCloudStorage } from '../utilities/storage.js'
 
@@ -66,21 +66,28 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
 
       const safeFilename = path.basename(doc.filename)
 
-      for (const format of formatsToGenerate) {
-        const result = await convertFormat(fileBuffer, format.format, format.quality)
-        const variantFilename = `${path.parse(safeFilename).name}-optimized.${format.format}`
+      const variantResults = await Promise.all(
+        formatsToGenerate.map(async (format) => {
+          const result = await convertFormat(fileBuffer, format.format, format.quality)
+          const variantFilename = `${path.parse(safeFilename).name}-optimized.${format.format}`
+          await fs.writeFile(path.join(staticDir, variantFilename), result.buffer)
+          return {
+            format: format.format,
+            filename: variantFilename,
+            filesize: result.size,
+            width: result.width,
+            height: result.height,
+            mimeType: result.mimeType,
+            url: `/api/${input.collectionSlug}/file/${variantFilename}`,
+          }
+        }),
+      )
+      variants.push(...variantResults)
 
-        await fs.writeFile(path.join(staticDir, variantFilename), result.buffer)
-
-        variants.push({
-          format: format.format,
-          filename: variantFilename,
-          filesize: result.size,
-          width: result.width,
-          height: result.height,
-          mimeType: result.mimeType,
-          url: `/api/${input.collectionSlug}/file/${variantFilename}`,
-        })
+      // Compute ThumbHash in the background job to avoid blocking the sync save path
+      let thumbHash: string | undefined
+      if (resolvedConfig.generateThumbHash) {
+        thumbHash = await generateThumbHash(fileBuffer)
       }
 
       await req.payload.update({
@@ -91,6 +98,7 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
             ...doc.imageOptimizer,
             status: 'complete',
             variants,
+            thumbHash,
             error: null,
           },
         },

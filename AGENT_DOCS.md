@@ -98,14 +98,12 @@ collections: {
 
 When an image is uploaded to an optimized collection:
 
-1. **`beforeChange` hook** (in-memory processing):
-   - If `uniqueFileNames: true`: renames file to UUID (e.g., `photo.jpg` → `a1b2c3d4.jpg`)
-   - Auto-rotates based on EXIF orientation
-   - Resizes to fit within `maxDimensions`
-   - Strips metadata (if enabled)
-   - If `replaceOriginal: true`: converts to primary format (first in `formats` array), updates filename/mimeType
-   - Generates ThumbHash (if enabled)
-   - Sets `imageOptimizer.status = 'pending'`
+1. **`beforeChange` hook** (single-pass in-memory processing):
+   - If `generateFilename` / `uniqueFileNames`: renames file (e.g., `photo.jpg` → `a1b2c3d4.jpg`)
+   - Single sharp pipeline: resizes to `maxDimensions`, strips metadata, and optionally converts to primary format — all in one decode/encode cycle
+   - Skips redundant `.rotate()` — Payload's `generateFileData()` already auto-rotated before hooks run
+   - If no async job is needed: generates ThumbHash synchronously (included in initial DB write)
+   - Sets `imageOptimizer.status` to `'pending'` (async job) or `'complete'` (no job needed)
 
 2. **`afterChange` hook** (disk + async):
    - Writes processed buffer to disk (overwriting Payload's original)
@@ -115,7 +113,8 @@ When an image is uploaded to an optimized collection:
 3. **Background job** (`imageOptimizer_convertFormats`):
    - Generates variant files for any additional formats (e.g., AVIF)
    - Writes variants to disk with `-optimized` suffix
-   - Updates document: `imageOptimizer.status = 'complete'`, populates `variants` array
+   - Generates ThumbHash (deferred from the sync save path to avoid blocking uploads)
+   - Updates document: `imageOptimizer.status = 'complete'`, populates `variants` array and `thumbHash`
 
 ### File Naming
 

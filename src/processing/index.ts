@@ -38,6 +38,45 @@ export async function generateThumbHash(buffer: Buffer): Promise<string> {
   return Buffer.from(thumbHash).toString('base64')
 }
 
+/**
+ * Single-pipeline image optimization: resize + metadata strip + optional format conversion.
+ * Skips .rotate() because Payload's generateFileData() already auto-rotates before hooks run.
+ */
+export async function optimizeImage(
+  buffer: Buffer,
+  options: {
+    maxDimensions: { width: number; height: number }
+    stripMetadata: boolean
+    format?: { format: 'webp' | 'avif'; quality: number }
+  },
+): Promise<{ buffer: Buffer; width: number; height: number; size: number; mimeType?: string }> {
+  let pipeline = sharp(buffer)
+    .resize(options.maxDimensions.width, options.maxDimensions.height, {
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+
+  if (!options.stripMetadata) {
+    pipeline = pipeline.keepMetadata()
+  }
+
+  if (options.format) {
+    pipeline = pipeline.toFormat(options.format.format, { quality: options.format.quality })
+  }
+
+  const { data, info } = await pipeline.toBuffer({ resolveWithObject: true })
+
+  return {
+    buffer: data,
+    width: info.width,
+    height: info.height,
+    size: info.size,
+    ...(options.format && {
+      mimeType: options.format.format === 'webp' ? 'image/webp' : 'image/avif',
+    }),
+  }
+}
+
 export async function convertFormat(
   buffer: Buffer,
   format: 'webp' | 'avif',

@@ -83,7 +83,7 @@ imageOptimizer({
   // Global defaults (overridden by per-collection config)
   formats: [
     { format: 'webp', quality: 80 },
-    { format: 'avif', quality: 65 },
+    // { format: 'avif', quality: 65 }, // opt-in — AVIF is ~5-10x slower to encode than WebP
   ],
   maxDimensions: { width: 2560, height: 2560 },
   generateThumbHash: true,
@@ -152,16 +152,16 @@ imageOptimizer({
 ## How It Works
 
 1. **Upload** — An image is uploaded to a configured collection
-2. **Pre-process** — The `beforeChange` hook strips metadata, resizes the image, and generates a ThumbHash
+2. **Pre-process** — A single-pass sharp pipeline strips metadata, resizes, and optionally converts format — all in one operation
 3. **Save** — Payload writes the optimized image to disk
-4. **Convert** — A background job converts the image to WebP/AVIF variants asynchronously
-5. **Done** — The document is updated with variant URLs, file sizes, and optimization status
+4. **Convert** — A background job converts the image to additional format variants (e.g. AVIF) and generates the ThumbHash asynchronously
+5. **Done** — The document is updated with variant URLs, file sizes, ThumbHash, and optimization status
 
-All format conversion runs as async background jobs, so uploads return immediately.
+Format conversion and ThumbHash generation run as async background jobs, so uploads return immediately.
 
 ### Vercel / Serverless Deployment
 
-Image processing (especially AVIF encoding, ThumbHash generation, and metadata stripping) can exceed the default serverless function timeout. The plugin exports a recommended `maxDuration` that you can re-export from your Payload API route:
+Image processing (especially AVIF encoding and metadata stripping) can exceed the default serverless function timeout. The plugin exports a recommended `maxDuration` that you can re-export from your Payload API route:
 
 ```ts
 // src/app/(payload)/api/[...slug]/route.ts
@@ -212,7 +212,7 @@ vercelBlobStorage({
 
 ## How It Differs from Payload's Default Image Handling
 
-Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and can resize images and generate sizes on upload. This plugin **does not double-process your images** — it intercepts the raw upload in a `beforeChange` hook *before* Payload's own sharp pipeline runs, and writes the optimized buffer back to `req.file.data`. When Payload's built-in `uploadFiles` step kicks in to generate your configured sizes, it works from the already-optimized file, not the raw original.
+Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and can resize images and generate sizes on upload. This plugin optimizes the uploaded image in a `beforeChange` hook and writes the result back to `req.file.data`. Payload's `generateFileData` runs before hooks and handles `imageSizes` generation using `Promise.all`, so the plugin focuses on what Payload doesn't do natively: format conversion (WebP/AVIF), metadata stripping, and ThumbHash generation. Using `clientOptimization: true` (the default) is the most effective way to speed up uploads with many `imageSizes`, since it reduces the source image before Payload processes it.
 
 ### Comparison
 
@@ -229,9 +229,10 @@ Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and ca
 
 ### CPU & Resource Impact
 
+- **Single-pass pipeline** — Metadata stripping, resizing, and format conversion run in a single sharp pipeline (one decode/encode cycle), minimizing processing overhead.
+- **Deferred ThumbHash** — ThumbHash generation runs in the background (via the format conversion job or `waitUntil`) rather than blocking the upload response.
 - **Single-format mode** (e.g. WebP only with `replaceOriginal: true`) adds virtually zero overhead compared to Payload's default sharp processing — the plugin replaces the sharp pass rather than adding a second one.
-- **Additional format variants** (e.g. both WebP and AVIF) run as background jobs after upload — this is the one area where you'll see extra CPU usage vs vanilla Payload.
-- **ThumbHash generation** processes a 100×100px thumbnail — negligible impact.
+- **Additional format variants** (e.g. both WebP and AVIF) run as background jobs after upload — this is the one area where you'll see extra CPU usage vs vanilla Payload. Note that AVIF encoding is ~5-10x slower than WebP.
 - **Bulk regeneration** processes images sequentially, not all at once, so it won't spike your server.
 
 If you're on a resource-constrained server, use single-format mode and you'll be at roughly the same CPU cost as stock Payload.

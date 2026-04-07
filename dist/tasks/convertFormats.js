@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { resolveCollectionConfig } from '../defaults.js';
-import { convertFormat } from '../processing/index.js';
+import { convertFormat, generateThumbHash } from '../processing/index.js';
 import { resolveStaticDir } from '../utilities/resolveStaticDir.js';
 import { fetchFileBuffer, isCloudStorage } from '../utilities/storage.js';
 export const createConvertFormatsHandler = (resolvedConfig)=>{
@@ -48,11 +48,11 @@ export const createConvertFormatsHandler = (resolvedConfig)=>{
             // skip it and only generate variants for the remaining formats.
             const formatsToGenerate = perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0 ? perCollectionConfig.formats.slice(1) : perCollectionConfig.formats;
             const safeFilename = path.basename(doc.filename);
-            for (const format of formatsToGenerate){
+            const variantResults = await Promise.all(formatsToGenerate.map(async (format)=>{
                 const result = await convertFormat(fileBuffer, format.format, format.quality);
                 const variantFilename = `${path.parse(safeFilename).name}-optimized.${format.format}`;
                 await fs.writeFile(path.join(staticDir, variantFilename), result.buffer);
-                variants.push({
+                return {
                     format: format.format,
                     filename: variantFilename,
                     filesize: result.size,
@@ -60,7 +60,13 @@ export const createConvertFormatsHandler = (resolvedConfig)=>{
                     height: result.height,
                     mimeType: result.mimeType,
                     url: `/api/${input.collectionSlug}/file/${variantFilename}`
-                });
+                };
+            }));
+            variants.push(...variantResults);
+            // Compute ThumbHash in the background job to avoid blocking the sync save path
+            let thumbHash;
+            if (resolvedConfig.generateThumbHash) {
+                thumbHash = await generateThumbHash(fileBuffer);
             }
             await req.payload.update({
                 collection: input.collectionSlug,
@@ -70,6 +76,7 @@ export const createConvertFormatsHandler = (resolvedConfig)=>{
                         ...doc.imageOptimizer,
                         status: 'complete',
                         variants,
+                        thumbHash,
                         error: null
                     }
                 },

@@ -99,12 +99,19 @@ describe('Image Optimizer Plugin', () => {
       },
     })
 
-    expect(doc.imageOptimizer.thumbHash).toBeDefined()
-    expect(typeof doc.imageOptimizer.thumbHash).toBe('string')
-    expect(doc.imageOptimizer.thumbHash.length).toBeGreaterThan(0)
+    // ThumbHash is computed in the background (deferred from the sync save path).
+    // Wait for the background job/waitUntil to complete, then re-fetch.
+    await payload.jobs.run()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const updatedDoc = await payload.findByID({ collection: 'media', id: doc.id })
+
+    expect(updatedDoc.imageOptimizer.thumbHash).toBeDefined()
+    expect(typeof updatedDoc.imageOptimizer.thumbHash).toBe('string')
+    expect(updatedDoc.imageOptimizer.thumbHash.length).toBeGreaterThan(0)
 
     // Verify it's valid base64 that decodes without error
-    const decoded = Buffer.from(doc.imageOptimizer.thumbHash, 'base64')
+    const decoded = Buffer.from(updatedDoc.imageOptimizer.thumbHash, 'base64')
     expect(decoded.length).toBeGreaterThan(0)
   })
 
@@ -134,29 +141,24 @@ describe('Image Optimizer Plugin', () => {
     })
 
     expect(updatedDoc.imageOptimizer.status).toBe('complete')
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(2)
 
-    const webpVariant = updatedDoc.imageOptimizer.variants.find(
-      (v: any) => v.format === 'webp',
-    )
+    // With replaceOriginal: true (default), the main file is already webp (first format).
+    // Only remaining formats (avif) appear as variants.
+    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
+    expect(updatedDoc.mimeType).toBe('image/webp')
+
     const avifVariant = updatedDoc.imageOptimizer.variants.find(
       (v: any) => v.format === 'avif',
     )
-
-    expect(webpVariant).toBeDefined()
-    expect(webpVariant.mimeType).toBe('image/webp')
-    expect(webpVariant.filesize).toBeGreaterThan(0)
 
     expect(avifVariant).toBeDefined()
     expect(avifVariant.mimeType).toBe('image/avif')
     expect(avifVariant.filesize).toBeGreaterThan(0)
 
-    // Verify variant files exist on disk
+    // Verify variant file exists on disk
     const mediaDir = path.resolve(dirname, 'media')
-    const webpExists = await fs.access(path.join(mediaDir, webpVariant.filename)).then(() => true).catch(() => false)
     const avifExists = await fs.access(path.join(mediaDir, avifVariant.filename)).then(() => true).catch(() => false)
 
-    expect(webpExists).toBe(true)
     expect(avifExists).toBe(true)
   })
 
@@ -207,8 +209,10 @@ describe('Image Optimizer Plugin', () => {
       id: doc.id,
     })
 
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
-    expect(updatedDoc.imageOptimizer.variants[0].format).toBe('webp')
+    // With replaceOriginal: true (default) and formats: [webp], the main file
+    // is already webp. No additional variants are generated (formats.slice(1) = []).
+    expect(updatedDoc.imageOptimizer.variants).toHaveLength(0)
+    expect(updatedDoc.mimeType).toBe('image/webp')
   })
 
   test('media collection with `true` should use global defaults (both formats)', async () => {
@@ -233,10 +237,11 @@ describe('Image Optimizer Plugin', () => {
       id: doc.id,
     })
 
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(2)
+    // With replaceOriginal: true (default), main file is webp. Only avif is a variant.
+    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
+    expect(updatedDoc.mimeType).toBe('image/webp')
 
     const formats = updatedDoc.imageOptimizer.variants.map((v: any) => v.format)
-    expect(formats).toContain('webp')
     expect(formats).toContain('avif')
   })
 
@@ -292,7 +297,9 @@ describe('Image Optimizer Plugin', () => {
     expect(updatedDoc.imageOptimizer.thumbHash.length).toBeGreaterThan(0)
     expect(updatedDoc.imageOptimizer.originalSize).toBeGreaterThan(0)
     expect(updatedDoc.imageOptimizer.optimizedSize).toBeGreaterThan(0)
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(2)
+    // replaceOriginal: true → main file is webp, only avif is a variant
+    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
+    expect(updatedDoc.imageOptimizer.variants[0].format).toBe('avif')
   })
 
   test('should skip non-image documents during regeneration', async () => {
@@ -343,8 +350,9 @@ describe('Image Optimizer Plugin', () => {
 
     const updatedDoc = await payload.findByID({ collection: 'avatars', id: doc.id })
     expect(updatedDoc.imageOptimizer.status).toBe('complete')
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
-    expect(updatedDoc.imageOptimizer.variants[0].format).toBe('webp')
+    // replaceOriginal: true + formats: [webp] → main file is webp, no additional variants
+    expect(updatedDoc.imageOptimizer.variants).toHaveLength(0)
+    expect(updatedDoc.mimeType).toBe('image/webp')
 
     // Verify file was resized
     const savedPath = path.resolve(dirname, 'avatars', updatedDoc.filename as string)
