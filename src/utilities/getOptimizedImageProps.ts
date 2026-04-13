@@ -18,7 +18,7 @@ export type OptimizedImageProps = ImageOptimizerProps & {
  *
  * ```tsx
  * // In your ImageMedia component — just add the import and spread:
- * import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/client'
+ * import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/frontend'
  *
  * const optimizedProps = getOptimizedImageProps(resource)
  *

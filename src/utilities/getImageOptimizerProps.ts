@@ -19,7 +19,7 @@ export type ImageOptimizerProps = {
  * Works with any component — including the Payload website template's `ImageMedia`:
  *
  * ```tsx
- * import { getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/client'
+ * import { getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/frontend'
  *
  * const optimizerProps = getImageOptimizerProps(resource)
  * <NextImage {...existingProps} {...optimizerProps} />

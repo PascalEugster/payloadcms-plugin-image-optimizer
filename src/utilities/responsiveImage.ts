@@ -54,7 +54,7 @@ export function findBestVariant(
  * loader needed — let next/image use its default behavior).
  *
  * ```tsx
- * import { createVariantLoader } from '@inoo-ch/payload-image-optimizer/client'
+ * import { createVariantLoader } from '@inoo-ch/payload-image-optimizer/frontend'
  *
  * const loader = createVariantLoader(media)
  * <NextImage loader={loader} src={media.url} ... />

@@ -250,12 +250,14 @@ A **Regenerate Images** button appears in collection list views, allowing you to
 
 ## Displaying Images
 
+> **Import from `/frontend`, not `/client`.** The frontend entry point (`@inoo-ch/payload-image-optimizer/frontend`) exports only display helpers (`ImageBox`, `FadeImage`, `getOptimizedImageProps`, `getImageOptimizerProps`, `createVariantLoader`) and has zero dependency on `@payloadcms/ui`. Importing from `/client` on a public page works but drags the admin UI into your frontend bundle under Turbopack. The `/client` barrel is kept for Payload's `importMap` and backward compatibility.
+
 ### Option 1: `ImageBox` (New Projects)
 
 Drop-in Next.js `<Image>` wrapper — the easiest way to display images with best practices:
 
 ```tsx
-import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
+import { ImageBox } from '@inoo-ch/payload-image-optimizer/frontend'
 
 // Hero image — fill mode with priority
 <ImageBox media={doc.heroImage} alt="Hero" fill priority />
@@ -280,7 +282,7 @@ import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
 If you're using the [Payload website template](https://github.com/payloadcms/payload/tree/main/templates/website) or have an existing `<NextImage>` component, add 3 lines:
 
 ```tsx
-import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/client'
+import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/frontend'
 
 const optimizedProps = getOptimizedImageProps(resource)
 

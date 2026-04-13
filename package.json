@@ -1,6 +1,6 @@
 {
   "name": "@inoo-ch/payload-image-optimizer",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "Payload CMS plugin for automatic image optimization — WebP/AVIF conversion, resize, EXIF strip, ThumbHash placeholders, and bulk regeneration",
   "license": "MIT",
   "keywords": [
@@ -35,6 +35,11 @@
       "import": "./dist/exports/client.js",
       "types": "./src/exports/client.ts",
       "default": "./dist/exports/client.js"
+    },
+    "./frontend": {
+      "import": "./dist/exports/frontend.js",
+      "types": "./src/exports/frontend.ts",
+      "default": "./dist/exports/frontend.js"
     },
     "./rsc": {
       "import": "./dist/exports/rsc.js",
@@ -123,6 +128,11 @@
         "import": "./dist/exports/client.js",
         "types": "./dist/exports/client.d.ts",
         "default": "./dist/exports/client.js"
+      },
+      "./frontend": {
+        "import": "./dist/exports/frontend.js",
+        "types": "./dist/exports/frontend.d.ts",
+        "default": "./dist/exports/frontend.js"
       },
       "./rsc": {
         "import": "./dist/exports/rsc.js",

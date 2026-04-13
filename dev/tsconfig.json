@@ -25,6 +25,9 @@
       "@inoo-ch/payload-image-optimizer/client": [
         "../src/exports/client.ts"
       ],
+      "@inoo-ch/payload-image-optimizer/frontend": [
+        "../src/exports/frontend.ts"
+      ],
       "@inoo-ch/payload-image-optimizer/rsc": [
         "../src/exports/rsc.ts"
       ]

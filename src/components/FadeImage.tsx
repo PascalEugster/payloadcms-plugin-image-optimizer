@@ -18,7 +18,7 @@ export interface FadeImageProps extends Omit<ImageProps, 'placeholder' | 'blurDa
  * Use this when you call `getImageOptimizerProps()` manually instead of using `ImageBox`:
  *
  * ```tsx
- * import { FadeImage, getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/client'
+ * import { FadeImage, getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/frontend'
  *
  * const optimizerProps = getImageOptimizerProps(resource)
  * <FadeImage src={src} alt="" optimizerProps={optimizerProps} width={800} height={600} />

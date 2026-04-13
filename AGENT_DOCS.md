@@ -220,14 +220,16 @@ Get current optimization status for a collection. Requires authentication.
 
 ## Client-Side Utilities
 
-Import from `@inoo-ch/payload-image-optimizer/client`:
+Import frontend display helpers from `@inoo-ch/payload-image-optimizer/frontend` (zero `@payloadcms/ui` dependency — safe to import on public pages).
+
+The `/client` entry point is reserved for Payload admin component resolution (`importMap`) and backward compatibility; importing display helpers from `/client` on public pages will drag admin UI into your frontend bundle under Turbopack.
 
 ### `ImageBox` Component (Recommended)
 
 Drop-in Next.js `<Image>` wrapper — the easiest way to display images with best practices. Automatically handles ThumbHash blur placeholders, focal point positioning, smooth fade-in, responsive variant loading, and smart `sizes` defaults.
 
 ```tsx
-import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
+import { ImageBox } from '@inoo-ch/payload-image-optimizer/frontend'
 
 // Pass the full Payload media document — ImageBox handles everything
 <ImageBox media={doc.heroImage} alt="Hero" fill priority />
@@ -267,7 +269,7 @@ import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
 Single-function integration for existing `<NextImage>` components. Returns ThumbHash, focal point, AND variant loader in one spread-friendly object. **This is the recommended way to integrate with the Payload website template's `ImageMedia` component.**
 
 ```tsx
-import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/client'
+import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/frontend'
 
 // In your existing ImageMedia component — 3 lines to add:
 const optimizedProps = getOptimizedImageProps(resource)
@@ -299,7 +301,7 @@ const optimizedProps = getOptimizedImageProps(resource)
 If you're using the [Payload website template](https://github.com/payloadcms/payload/tree/main/templates/website), modify `src/components/Media/ImageMedia/index.tsx`:
 
 ```diff
-+ import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/client'
++ import { getOptimizedImageProps } from '@inoo-ch/payload-image-optimizer/frontend'
 
   export const ImageMedia: React.FC<MediaProps> = (props) => {
     // ... existing code ...
@@ -336,7 +338,7 @@ This replaces the template's hardcoded blur placeholder with per-image ThumbHash
 Returns only ThumbHash placeholder and focal point props (no variant loader). Use when you need granular control or don't want the variant loader.
 
 ```tsx
-import { getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/client'
+import { getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/frontend'
 
 const optimizerProps = getImageOptimizerProps(media)
 
@@ -361,7 +363,7 @@ const optimizerProps = getImageOptimizerProps(media)
 Creates a Next.js Image `loader` that maps requested widths to pre-generated Payload size variants. Use when building fully custom image components.
 
 ```tsx
-import { createVariantLoader } from '@inoo-ch/payload-image-optimizer/client'
+import { createVariantLoader } from '@inoo-ch/payload-image-optimizer/frontend'
 
 const loader = createVariantLoader(media) // returns undefined when no variants
 
@@ -379,7 +381,7 @@ const loader = createVariantLoader(media) // returns undefined when no variants
 Returns a sensible default `sizes` attribute for fill-mode images:
 
 ```tsx
-import { getDefaultSizes } from '@inoo-ch/payload-image-optimizer/client'
+import { getDefaultSizes } from '@inoo-ch/payload-image-optimizer/frontend'
 
 const sizes = getDefaultSizes(true) // '(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw'
 const sizes = getDefaultSizes(false) // undefined (let next/image use 1x/2x descriptors)
@@ -390,7 +392,7 @@ const sizes = getDefaultSizes(false) // undefined (let next/image use 1x/2x desc
 Standalone Next.js `<Image>` wrapper with fade-in transition for use with `getImageOptimizerProps()`. Use this when you have a custom image component and want the fade effect without `ImageBox`.
 
 ```tsx
-import { FadeImage, getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/client'
+import { FadeImage, getImageOptimizerProps } from '@inoo-ch/payload-image-optimizer/frontend'
 
 const optimizerProps = getImageOptimizerProps(resource)
 
@@ -531,7 +533,7 @@ export default buildConfig({
 
 ```tsx
 // components/Hero.tsx
-import { ImageBox } from '@inoo-ch/payload-image-optimizer/client'
+import { ImageBox } from '@inoo-ch/payload-image-optimizer/frontend'
 
 export function Hero({ image }) {
   return (
@@ -561,7 +563,7 @@ import type {
   FadeImageProps,
   ImageOptimizerProps,    // return type of getImageOptimizerProps
   OptimizedImageProps,    // return type of getOptimizedImageProps
-} from '@inoo-ch/payload-image-optimizer/client'
+} from '@inoo-ch/payload-image-optimizer/frontend'
 ```
 
 ### `MediaResource` Type
