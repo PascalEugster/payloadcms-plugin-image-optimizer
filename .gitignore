@@ -48,3 +48,8 @@ yarn-error.log*
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Local agent / debug artifacts
+/.claude/
+/.playwright-mcp/
+/seo-filename-test-result.png

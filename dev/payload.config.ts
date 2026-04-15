@@ -45,6 +45,18 @@ const buildConfigWithMemoryDB = async () => {
         fields: [],
         upload: {
           staticDir: path.resolve(dirname, 'media'),
+          // Regression harness for the aspect-ratio srcset filter (v1.11.1).
+          // `og` and `square` are intentionally fixed-aspect variants that
+          // should be excluded from `createVariantLoader`'s srcset output
+          // when the source image does not share their aspect ratio.
+          imageSizes: [
+            { name: 'thumbnail', width: 300, height: undefined, fit: 'inside' },
+            { name: 'small', width: 600, height: undefined, fit: 'inside' },
+            { name: 'medium', width: 900, height: undefined, fit: 'inside' },
+            { name: 'large', width: 1400, height: undefined, fit: 'inside' },
+            { name: 'og', width: 1200, height: 630, fit: 'cover', position: 'center' },
+            { name: 'square', width: 500, height: 500, fit: 'cover', position: 'center' },
+          ],
         },
       },
       {
