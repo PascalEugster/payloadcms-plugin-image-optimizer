@@ -6,16 +6,58 @@ type ImageLoader = (props: ImageLoaderProps) => string
 type ValidVariant = { url: string; width: number }
 
 /**
- * Extracts usable variants from a Payload media resource's `sizes` field.
- * Filters out entries missing url or width and sorts by width ascending.
+ * Relative aspect-ratio tolerance for variant filtering.
+ *
+ * Sharp rounds variant dimensions to integers, so a source of 1700×1365 (ratio 1.2454)
+ * can produce a 1400×1124 variant (ratio 1.2456) — an irreducible ~0.02% drift purely
+ * from rounding. 3% gives small variants room to breathe while still excluding
+ * anything that's actually a different aspect (e.g. a 1200×630 OG crop vs a 4:3 source).
  */
-function getValidVariants(media: MediaResource): ValidVariant[] {
+const ASPECT_RATIO_TOLERANCE = 0.03
+
+/**
+ * Decides whether a variant shares the source image's aspect ratio closely enough
+ * to belong in a responsive `srcset`.
+ *
+ * Degrades gracefully: when either dimension is missing we can't compute a ratio,
+ * so we keep the variant rather than nuking the whole srcset.
+ */
+function variantMatchesSourceAspect(
+  variant: MediaSizeVariant,
+  sourceAspect: number | null,
+): boolean {
+  if (sourceAspect === null) return true
+  if (typeof variant.width !== 'number' || typeof variant.height !== 'number') return true
+  if (variant.height === 0) return true
+
+  const variantAspect = variant.width / variant.height
+  const drift = Math.abs(variantAspect - sourceAspect) / sourceAspect
+  return drift <= ASPECT_RATIO_TOLERANCE
+}
+
+/**
+ * Extracts usable variants from a Payload media resource's `sizes` field.
+ *
+ * Filters out entries missing url/width, excludes variants whose aspect ratio
+ * doesn't match the source (within {@link ASPECT_RATIO_TOLERANCE}), and sorts
+ * by width ascending. Aspect filtering prevents fixed-crop variants like
+ * `og` (1200×630) or `square` (500×500) from polluting responsive srcsets.
+ */
+export function getValidVariants(media: MediaResource): ValidVariant[] {
   if (!media.sizes) return []
+
+  const sourceAspect =
+    typeof media.width === 'number' &&
+    typeof media.height === 'number' &&
+    media.height > 0
+      ? media.width / media.height
+      : null
 
   return Object.values(media.sizes)
     .filter((v): v is MediaSizeVariant & { url: string; width: number } =>
       v != null && typeof v.url === 'string' && typeof v.width === 'number',
     )
+    .filter((v) => variantMatchesSourceAspect(v, sourceAspect))
     .sort((a, b) => a.width - b.width)
 }
 
