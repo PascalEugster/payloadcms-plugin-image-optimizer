@@ -8,6 +8,13 @@ import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { fileURLToPath } from 'url'
 
+import { resolveConfig } from '../src/defaults.js'
+import {
+  createCancelHandler,
+  createRegenerateHandler,
+  createRegenerateStatusHandler,
+} from '../src/endpoints/regenerate.js'
+
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let payload: Payload
@@ -325,6 +332,93 @@ describe('Image Optimizer Plugin', () => {
 
     const updatedDoc = await payload.findByID({ collection: 'media', id: doc.id })
     expect(updatedDoc.imageOptimizer?.status).toBeUndefined()
+  })
+
+  describe('/image-optimizer/regenerate endpoint', () => {
+    // Mirror the plugin config used in dev/payload.config.ts so the resolved
+    // config matches what the running server actually has wired up.
+    const resolvedConfig = resolveConfig({
+      collections: {
+        media: true,
+        avatars: {
+          maxDimensions: { width: 256, height: 256 },
+          formats: [{ format: 'webp', quality: 90 }],
+        },
+      },
+    })
+
+    const mkReq = (
+      overrides: {
+        url?: string
+        body?: unknown
+        user?: Record<string, unknown> | null
+      } = {},
+    ) =>
+      ({
+        user: overrides.user === null ? undefined : overrides.user ?? { id: 'test-user' },
+        url: overrides.url ?? 'http://localhost/api/image-optimizer/regenerate',
+        payload,
+        json: async () => overrides.body ?? {},
+      }) as any
+
+    test('GET returns 200 with configured:false for an unconfigured collection (log-noise fix)', async () => {
+      const handler = createRegenerateStatusHandler(resolvedConfig)
+      const res: Response = await handler(
+        mkReq({ url: 'http://localhost/api/image-optimizer/regenerate?collection=posts' }),
+      )
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.configured).toBe(false)
+      expect(body.total).toBe(0)
+      expect(body.complete).toBe(0)
+      expect(body.errored).toBe(0)
+      expect(body.pending).toBe(0)
+      expect(body.cancelled).toBe(false)
+    })
+
+    test('GET returns 200 with configured:true for a configured collection', async () => {
+      const handler = createRegenerateStatusHandler(resolvedConfig)
+      const res: Response = await handler(
+        mkReq({ url: 'http://localhost/api/image-optimizer/regenerate?collection=media' }),
+      )
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.configured).toBe(true)
+      expect(typeof body.total).toBe('number')
+    })
+
+    test('GET returns 400 when the collection query param is missing', async () => {
+      const handler = createRegenerateStatusHandler(resolvedConfig)
+      const res: Response = await handler(
+        mkReq({ url: 'http://localhost/api/image-optimizer/regenerate' }),
+      )
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error).toMatch(/collection/i)
+    })
+
+    test('GET returns 401 when no user is attached', async () => {
+      const handler = createRegenerateStatusHandler(resolvedConfig)
+      const res: Response = await handler(
+        mkReq({
+          url: 'http://localhost/api/image-optimizer/regenerate?collection=media',
+          user: null,
+        }),
+      )
+      expect(res.status).toBe(401)
+    })
+
+    test('POST still returns 400 for unconfigured collection (regression guard — side effects)', async () => {
+      const handler = createRegenerateHandler(resolvedConfig)
+      const res: Response = await handler(mkReq({ body: { collectionSlug: 'posts' } }))
+      expect(res.status).toBe(400)
+    })
+
+    test('DELETE still returns 400 for unconfigured collection (regression guard — side effects)', async () => {
+      const handler = createCancelHandler(resolvedConfig)
+      const res: Response = await handler(mkReq({ body: { collectionSlug: 'posts' } }))
+      expect(res.status).toBe(400)
+    })
   })
 
   test('should regenerate with per-collection config (avatars)', async () => {

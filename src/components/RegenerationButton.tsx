@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useSelection } from '@payloadcms/ui'
 
+import { readSlugFromUrl, shouldFetchStatsForSlug } from '../utilities/regenerateSlugGuard.js'
+
 type RegenerationProgress = {
   total: number
   complete: number
@@ -38,29 +40,45 @@ export const RegenerationButton: React.FC = () => {
   // so we can compute batch-relative progress for selective regeneration.
   const baselineRef = useRef<number | null>(null)
   const prevIsRunningRef = useRef(false)
+  // The slug this instance was mounted against. Used to suppress fetches when
+  // the admin shell keeps the component alive across SPA navigation to a
+  // collection the plugin doesn't target.
+  const mountedSlugRef = useRef<string | null>(null)
 
   // Extract collection slug from URL after mount to avoid hydration mismatch
   useEffect(() => {
-    const slug = window.location.pathname.split('/collections/')[1]?.split('/')[0] ?? null
+    const slug = readSlugFromUrl()
+    mountedSlugRef.current = slug
     setCollectionSlug(slug)
   }, [])
 
+  // Only fire status requests while the URL still points at the slug we were
+  // mounted for. Protects against the admin shell leaking the component into
+  // unrelated list/edit views.
+  const shouldFetchForSlug = useCallback(
+    (slug: string | null): slug is string =>
+      shouldFetchStatsForSlug(slug, mountedSlugRef.current, readSlugFromUrl()),
+    [],
+  )
+
   // Fetch optimization stats (independent of regeneration)
   const fetchStats = useCallback(async () => {
-    if (!collectionSlug) return
+    if (!shouldFetchForSlug(collectionSlug)) return
     try {
       const res = await fetch(
         `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
       )
       if (res.ok) {
-        const data: RegenerationStats = await res.json()
+        const data: RegenerationStats & { configured?: boolean } = await res.json()
+        // Server says this collection isn't configured — nothing to render.
+        if (data.configured === false) return
         setStats(data)
         if (typeof data.allowForceAll === 'boolean') setAllowForceAll(data.allowForceAll)
       }
     } catch {
       // ignore stats fetch errors
     }
-  }, [collectionSlug])
+  }, [collectionSlug, shouldFetchForSlug])
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
@@ -79,13 +97,23 @@ export const RegenerationButton: React.FC = () => {
   )
 
   const pollProgress = useCallback(async () => {
-    if (!collectionSlug) return
+    if (!shouldFetchForSlug(collectionSlug)) {
+      // URL moved off our collection — stop any lingering polling.
+      stopPolling()
+      return
+    }
     try {
       const res = await fetch(
         `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
       )
       if (res.ok) {
         const data = await res.json()
+        // Server says this collection isn't configured — nothing to poll.
+        if (data.configured === false) {
+          stopPolling()
+          setIsRunning(false)
+          return
+        }
         setProgress(data)
 
         // Stop polling if server reports cancellation
@@ -126,13 +154,13 @@ export const RegenerationButton: React.FC = () => {
     } catch {
       // ignore polling errors
     }
-  }, [collectionSlug, stopPolling])
+  }, [collectionSlug, stopPolling, shouldFetchForSlug])
 
   // On mount: fetch stats for the counter display. If the user previously
   // triggered regeneration (sessionStorage flag) and there are still pending
   // images, resume polling so the UI reconnects after page navigation.
   useEffect(() => {
-    if (!collectionSlug) return
+    if (!shouldFetchForSlug(collectionSlug)) return
     let cancelled = false
     const loadStats = async () => {
       try {
@@ -140,7 +168,9 @@ export const RegenerationButton: React.FC = () => {
           `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
         )
         if (!res.ok || cancelled) return
-        const data: RegenerationStats = await res.json()
+        const data: RegenerationStats & { configured?: boolean } = await res.json()
+        // Unconfigured collection — leave stats null, don't resume polling.
+        if (data.configured === false) return
         setStats(data)
         if (typeof data.allowForceAll === 'boolean') setAllowForceAll(data.allowForceAll)
 
@@ -165,7 +195,7 @@ export const RegenerationButton: React.FC = () => {
       cancelled = true
       stopPolling()
     }
-  }, [collectionSlug, pollProgress, startPolling, stopPolling])
+  }, [collectionSlug, pollProgress, startPolling, stopPolling, shouldFetchForSlug])
 
   // Refresh stats when regeneration finishes (isRunning transitions from true to false)
   useEffect(() => {

@@ -149,8 +149,26 @@ export const createRegenerateStatusHandler = (resolvedConfig: ResolvedImageOptim
     const url = new URL(req.url!)
     const collectionSlug = url.searchParams.get('collection')
 
-    if (!collectionSlug || !resolvedConfig.collections[collectionSlug as CollectionSlug]) {
-      return Response.json({ error: 'Invalid collection slug' }, { status: 400 })
+    // Missing query param is still a client error.
+    if (!collectionSlug) {
+      return Response.json({ error: 'Missing collection query param' }, { status: 400 })
+    }
+
+    // An unconfigured collection is a legitimate "nothing to report" state for
+    // a read-only status endpoint — answer with a well-formed no-op payload
+    // instead of 400 so consumers can ignore the response without logging
+    // errors. (POST/DELETE stay 400 — they have side effects.)
+    if (!resolvedConfig.collections[collectionSlug as CollectionSlug]) {
+      return Response.json({
+        collectionSlug,
+        configured: false,
+        total: 0,
+        complete: 0,
+        errored: 0,
+        pending: 0,
+        cancelled: false,
+        allowForceAll: resolvedConfig.regenerateButton.allowForceAll,
+      })
     }
 
     const total = await req.payload.count({
@@ -180,6 +198,7 @@ export const createRegenerateStatusHandler = (resolvedConfig: ResolvedImageOptim
 
     return Response.json({
       collectionSlug,
+      configured: true,
       total: total.totalDocs,
       complete: complete.totalDocs,
       errored: errored.totalDocs,
