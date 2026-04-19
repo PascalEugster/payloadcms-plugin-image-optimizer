@@ -48,6 +48,12 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
   const formError = formState[`${basePath}.error`]?.value as string | undefined
 
   const [polledData, setPolledData] = React.useState<PolledData | null>(null)
+  const [regenerating, setRegenerating] = React.useState(false)
+  const [regenError, setRegenError] = React.useState<string | null>(null)
+  // updatedAt snapshot captured before POSTing a regenerate so we can detect
+  // the doc has been re-written (status stays 'complete' throughout, so we
+  // can't rely on a status transition to signal completion).
+  const regenerateStartRef = React.useRef<string | null>(null)
 
   // Reset polled data when a new upload changes the form status back to pending
   React.useEffect(() => {
@@ -56,10 +62,13 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
     }
   }, [formStatus])
 
-  // Poll for status updates when status is non-terminal
+  // Poll for status updates when status is non-terminal OR a regeneration
+  // we initiated is still in flight.
   React.useEffect(() => {
     const currentStatus = polledData?.status ?? formStatus
-    if (!currentStatus || currentStatus === 'complete' || currentStatus === 'error') return
+    const terminal = currentStatus === 'complete' || currentStatus === 'error'
+    if (terminal && !regenerating) return
+    if (!currentStatus && !regenerating) return
     if (!collectionSlug || !id) return
 
     const controller = new AbortController()
@@ -82,6 +91,20 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
           error: optimizer.error,
           variants: optimizer.variants,
         })
+
+        // If a user-initiated regeneration wrote a new revision (updatedAt
+        // advanced) and status is terminal, we're done.
+        const baseline = regenerateStartRef.current
+        if (
+          regenerating &&
+          baseline &&
+          typeof doc.updatedAt === 'string' &&
+          doc.updatedAt !== baseline &&
+          (optimizer.status === 'complete' || optimizer.status === 'error')
+        ) {
+          regenerateStartRef.current = null
+          setRegenerating(false)
+        }
       } catch {
         // Silently ignore fetch errors (abort, network issues)
       }
@@ -95,7 +118,7 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
       controller.abort()
       clearInterval(intervalId)
     }
-  }, [polledData?.status, formStatus, collectionSlug, id])
+  }, [polledData?.status, formStatus, collectionSlug, id, regenerating])
 
   // Use polled data when available, otherwise fall back to form state
   const status = polledData?.status ?? formStatus
@@ -138,6 +161,37 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
     }
     return formVariants
   }, [polledData?.variants, formState, basePath])
+
+  const handleRegenerate = React.useCallback(async () => {
+    if (!collectionSlug || !id || regenerating) return
+    setRegenError(null)
+    try {
+      // Snapshot updatedAt so the poll loop can detect the re-write.
+      const baseline = await fetch(`/api/${collectionSlug}/${id}?depth=0`)
+      if (baseline.ok) {
+        const doc = await baseline.json()
+        regenerateStartRef.current = typeof doc.updatedAt === 'string' ? doc.updatedAt : null
+      }
+
+      // Flip to regenerating before the POST so the in-flight state is visible
+      // during the network round-trip, not just while the job actually runs.
+      setRegenerating(true)
+
+      const res = await fetch('/api/image-optimizer/regenerate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collectionSlug, docIds: [String(id)] }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data?.error || `Regenerate request failed (${res.status})`)
+      }
+    } catch (err) {
+      setRegenerating(false)
+      regenerateStartRef.current = null
+      setRegenError(err instanceof Error ? err.message : String(err))
+    }
+  }, [collectionSlug, id, regenerating])
 
   if (!status) {
     return (
@@ -209,6 +263,32 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
               ({v.width}x{v.height})
             </div>
           ))}
+        </div>
+      )}
+
+      {collectionSlug && id != null && (
+        <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <button
+            type="button"
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            style={{
+              alignSelf: 'flex-start',
+              backgroundColor: regenerating ? '#9ca3af' : '#4f46e5',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              fontSize: '12px',
+              fontWeight: 500,
+              cursor: regenerating ? 'wait' : 'pointer',
+            }}
+          >
+            {regenerating ? 'Regenerating…' : 'Regenerate this image'}
+          </button>
+          {regenError && (
+            <span style={{ color: '#ef4444', fontSize: '12px' }}>{regenError}</span>
+          )}
         </div>
       )}
     </div>

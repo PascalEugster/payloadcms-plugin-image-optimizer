@@ -1,4 +1,18 @@
 import { uuidFilename } from './utilities/filenameStrategies.js';
+const resolveRegenerateButton = (value)=>{
+    if (value === false) return {
+        enabled: false,
+        allowForceAll: false
+    };
+    if (value === true || value == null) return {
+        enabled: true,
+        allowForceAll: false
+    };
+    return {
+        enabled: value.enabled ?? true,
+        allowForceAll: value.allowForceAll ?? false
+    };
+};
 /**
  * Resolve the generateFilename option:
  * - Explicit `generateFilename` callback takes priority
@@ -25,7 +39,7 @@ export const resolveConfig = (config)=>({
             width: 2560,
             height: 2560
         },
-        regenerateButton: config.regenerateButton ?? true,
+        regenerateButton: resolveRegenerateButton(config.regenerateButton),
         replaceOriginal: config.replaceOriginal ?? true,
         stripMetadata: config.stripMetadata ?? true
     });

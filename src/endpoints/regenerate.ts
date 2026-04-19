@@ -51,6 +51,11 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
       )
     }
 
+    // Config is the source of truth — a client that sends `force: true` when
+    // the plugin hasn't opted in gets the safe default (unoptimized only).
+    const forceAllowed = resolvedConfig.regenerateButton.allowForceAll
+    const force = forceAllowed ? !!body.force : false
+
     let queued = 0
 
     if (body.docIds && body.docIds.length > 0) {
@@ -68,7 +73,7 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
     } else {
       // Find all image documents in the collection
       // Unless force=true, skip already-processed docs
-      const where: Where = body.force
+      const where: Where = force
         ? { mimeType: { contains: 'image/' } }
         : {
             and: [
@@ -180,6 +185,7 @@ export const createRegenerateStatusHandler = (resolvedConfig: ResolvedImageOptim
       errored: errored.totalDocs,
       pending: total.totalDocs - complete.totalDocs - errored.totalDocs,
       cancelled,
+      allowForceAll: resolvedConfig.regenerateButton.allowForceAll,
     })
   }
 

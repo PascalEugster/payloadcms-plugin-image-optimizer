@@ -54,6 +54,10 @@ export const createRegenerateHandler = (resolvedConfig)=>{
                 status: 400
             });
         }
+        // Config is the source of truth — a client that sends `force: true` when
+        // the plugin hasn't opted in gets the safe default (unoptimized only).
+        const forceAllowed = resolvedConfig.regenerateButton.allowForceAll;
+        const force = forceAllowed ? !!body.force : false;
         let queued = 0;
         if (body.docIds && body.docIds.length > 0) {
             // Regenerate specific documents by ID
@@ -70,7 +74,7 @@ export const createRegenerateHandler = (resolvedConfig)=>{
         } else {
             // Find all image documents in the collection
             // Unless force=true, skip already-processed docs
-            const where = body.force ? {
+            const where = force ? {
                 mimeType: {
                     contains: 'image/'
                 }
@@ -206,7 +210,8 @@ export const createRegenerateStatusHandler = (resolvedConfig)=>{
             complete: complete.totalDocs,
             errored: errored.totalDocs,
             pending: total.totalDocs - complete.totalDocs - errored.totalDocs,
-            cancelled
+            cancelled,
+            allowForceAll: resolvedConfig.regenerateButton.allowForceAll
         });
     };
     return handler;

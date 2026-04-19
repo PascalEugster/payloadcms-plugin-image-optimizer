@@ -59,7 +59,7 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                                 Upload: '@inoo-ch/payload-image-optimizer/client#UploadOptimizer'
                             }
                         } : {},
-                        ...resolvedConfig.regenerateButton ? {
+                        ...resolvedConfig.regenerateButton.enabled ? {
                             beforeListTable: [
                                 ...collection.admin?.components?.beforeListTable || [],
                                 '@inoo-ch/payload-image-optimizer/client#RegenerationButton'

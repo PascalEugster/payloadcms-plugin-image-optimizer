@@ -70,7 +70,7 @@ export const imageOptimizer =
                   },
                 }
               : {}),
-            ...(resolvedConfig.regenerateButton
+            ...(resolvedConfig.regenerateButton.enabled
             ? {
                 beforeListTable: [
                   ...(collection.admin?.components?.beforeListTable || []),

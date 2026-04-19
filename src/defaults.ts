@@ -1,7 +1,23 @@
 import type { CollectionSlug } from 'payload'
 
-import type { ImageOptimizerConfig, ResolvedCollectionOptimizerConfig, ResolvedImageOptimizerConfig } from './types.js'
+import type {
+  ImageOptimizerConfig,
+  ResolvedCollectionOptimizerConfig,
+  ResolvedImageOptimizerConfig,
+  ResolvedRegenerateButtonConfig,
+} from './types.js'
 import { uuidFilename } from './utilities/filenameStrategies.js'
+
+const resolveRegenerateButton = (
+  value: ImageOptimizerConfig['regenerateButton'],
+): ResolvedRegenerateButtonConfig => {
+  if (value === false) return { enabled: false, allowForceAll: false }
+  if (value === true || value == null) return { enabled: true, allowForceAll: false }
+  return {
+    enabled: value.enabled ?? true,
+    allowForceAll: value.allowForceAll ?? false,
+  }
+}
 
 /**
  * Resolve the generateFilename option:
@@ -25,7 +41,7 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   generateFilename: resolveGenerateFilename(config),
   generateThumbHash: config.generateThumbHash ?? true,
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
-  regenerateButton: config.regenerateButton ?? true,
+  regenerateButton: resolveRegenerateButton(config.regenerateButton),
   replaceOriginal: config.replaceOriginal ?? true,
   stripMetadata: config.stripMetadata ?? true,
 })

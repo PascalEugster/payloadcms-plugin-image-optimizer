@@ -19,6 +19,7 @@ export const RegenerationButton = ()=>{
     const [cancelled, setCancelled] = useState(false);
     const [collectionSlug, setCollectionSlug] = useState(null);
     const [stats, setStats] = useState(null);
+    const [allowForceAll, setAllowForceAll] = useState(false);
     const [confirming, setConfirming] = useState(false);
     const intervalRef = useRef(null);
     const stallRef = useRef({
@@ -42,6 +43,7 @@ export const RegenerationButton = ()=>{
             if (res.ok) {
                 const data = await res.json();
                 setStats(data);
+                if (typeof data.allowForceAll === 'boolean') setAllowForceAll(data.allowForceAll);
             }
         } catch  {
         // ignore stats fetch errors
@@ -120,6 +122,7 @@ export const RegenerationButton = ()=>{
                 if (!res.ok || cancelled) return;
                 const data = await res.json();
                 setStats(data);
+                if (typeof data.allowForceAll === 'boolean') setAllowForceAll(data.allowForceAll);
                 // Resume polling only if the user triggered regeneration in this session
                 const wasRunning = sessionStorage.getItem(SESSION_KEY) === collectionSlug;
                 if (wasRunning && data.pending > 0) {
@@ -210,9 +213,10 @@ export const RegenerationButton = ()=>{
         // Capture current complete+errored as baseline before new jobs run
         baselineRef.current = stats ? stats.complete + stats.errored : 0;
         try {
+            const effectiveForce = allowForceAll && force;
             const requestBody = {
                 collectionSlug,
-                force
+                force: effectiveForce
             };
             if (hasSelection) {
                 requestBody.docIds = getSelectedIds().map(String);
@@ -271,20 +275,28 @@ export const RegenerationButton = ()=>{
             flexWrap: 'wrap'
         },
         children: [
-            !confirming && !isRunning && /*#__PURE__*/ _jsx("button", {
-                onClick: handlePreflight,
-                style: {
-                    backgroundColor: '#4f46e5',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '8px 16px',
-                    fontSize: '14px',
-                    fontWeight: 500,
-                    cursor: 'pointer'
-                },
-                children: hasSelection ? `Regenerate ${selectionCount} Selected` : 'Regenerate All Images'
-            }),
+            !confirming && !isRunning && (()=>{
+                const pending = stats?.pending ?? 0;
+                // Primary action is scoped to what actually needs work. Force-all is an
+                // explicit opt-in via plugin config.
+                const nothingToDo = !hasSelection && pending === 0 && !(allowForceAll && force);
+                const label = hasSelection ? `Regenerate ${selectionCount} Selected` : allowForceAll && force ? `Re-process all ${stats?.total ?? 0} images` : pending > 0 ? `Regenerate ${pending} Unoptimized` : 'All images optimized';
+                return /*#__PURE__*/ _jsx("button", {
+                    onClick: handlePreflight,
+                    disabled: nothingToDo,
+                    style: {
+                        backgroundColor: nothingToDo ? '#9ca3af' : '#4f46e5',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '8px 16px',
+                        fontSize: '14px',
+                        fontWeight: 500,
+                        cursor: nothingToDo ? 'not-allowed' : 'pointer'
+                    },
+                    children: label
+                });
+            })(),
             !confirming && isRunning && /*#__PURE__*/ _jsx("button", {
                 onClick: handleStop,
                 style: {
@@ -311,7 +323,7 @@ export const RegenerationButton = ()=>{
                             fontSize: '13px',
                             color: '#374151'
                         },
-                        children: hasSelection ? `Regenerate ${selectionCount} selected image${selectionCount !== 1 ? 's' : ''}?` : force ? `Re-process all ${stats.total} images across the entire collection?` : `Regenerate ${stats.pending} unoptimized image${stats.pending !== 1 ? 's' : ''} across the entire collection?`
+                        children: hasSelection ? `Regenerate ${selectionCount} selected image${selectionCount !== 1 ? 's' : ''}?` : allowForceAll && force ? `Re-process all ${stats.total} images across the entire collection?` : `Regenerate ${stats.pending} unoptimized image${stats.pending !== 1 ? 's' : ''} across the entire collection?`
                     }),
                     /*#__PURE__*/ _jsx("button", {
                         onClick: handleConfirm,
@@ -343,7 +355,7 @@ export const RegenerationButton = ()=>{
                     })
                 ]
             }),
-            !confirming && /*#__PURE__*/ _jsxs("label", {
+            !confirming && allowForceAll && /*#__PURE__*/ _jsxs("label", {
                 style: {
                     display: 'flex',
                     alignItems: 'center',

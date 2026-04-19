@@ -38,6 +38,20 @@ export type CollectionOptimizerConfig = {
 
 export type FieldsOverride = (args: { defaultFields: Field[] }) => Field[]
 
+export type RegenerateButtonConfig = {
+  /** Whether the button is rendered at all. Defaults to `true`. */
+  enabled?: boolean
+  /** Expose the "Force re-process all" opt-in that reprocesses already-optimized
+   * images across the whole collection. Defaults to `false` — the primary action
+   * is always "Regenerate N Unoptimized" unless this is set to `true`. */
+  allowForceAll?: boolean
+}
+
+export type ResolvedRegenerateButtonConfig = {
+  enabled: boolean
+  allowForceAll: boolean
+}
+
 export type ImageOptimizerConfig = {
   clientOptimization?: boolean
   collections: Partial<Record<CollectionSlug, true | CollectionOptimizerConfig>>
@@ -66,9 +80,14 @@ export type ImageOptimizerConfig = {
   generateFilename?: GenerateFilename
   generateThumbHash?: boolean
   maxDimensions?: { width: number; height: number }
-  /** Show the "Regenerate All Images" button in the collection list view.
-   * Defaults to `true`. */
-  regenerateButton?: boolean
+  /** Regeneration button config for the collection list view.
+   *
+   * - `true` (default) — show the button; default action is "Regenerate N Unoptimized".
+   * - `false` — hide the button entirely.
+   * - `{ enabled?, allowForceAll? }` — fine-grained control.
+   *   `allowForceAll: true` exposes the "Force re-process all" opt-in (default: `false`).
+   */
+  regenerateButton?: boolean | RegenerateButtonConfig
   replaceOriginal?: boolean
   stripMetadata?: boolean
   /** Replace original filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`).
@@ -92,7 +111,7 @@ export type ResolvedImageOptimizerConfig = Required<
   disabled: boolean
   /** Resolved filename generator. `undefined` means keep original filename. */
   generateFilename?: GenerateFilename
-  regenerateButton: boolean
+  regenerateButton: ResolvedRegenerateButtonConfig
   replaceOriginal: boolean
 }
 

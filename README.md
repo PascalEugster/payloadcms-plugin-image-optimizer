@@ -104,6 +104,7 @@ imageOptimizer({
 | `stripMetadata` | `boolean` | `true` | Remove EXIF and other metadata from images. |
 | `uniqueFileNames` | `boolean` | `false` | Replace filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`). Prevents Vercel Blob "already exists" errors on uploads and regeneration. |
 | `clientOptimization` | `boolean` | `true` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
+| `regenerateButton` | `boolean \| { enabled?: boolean, allowForceAll?: boolean }` | `true` | Controls the regeneration UI. `false` hides it entirely. Pass an object to opt in to the `Force re-process all` checkbox (`allowForceAll: true`) — off by default so the primary action is always "Regenerate N Unoptimized". |
 | `disabled` | `boolean` | `false` | Disable optimization while keeping schema fields intact. |
 
 ### Per-Collection Overrides
@@ -245,8 +246,9 @@ The plugin adds an **Optimization Status** panel to the document sidebar showing
 - Original vs. optimized file size with savings percentage
 - ThumbHash blur preview thumbnail
 - List of generated format variants with dimensions and file sizes
+- **Regenerate this image** button to re-run optimization on the current document only
 
-A **Regenerate Images** button appears in collection list views, allowing you to bulk re-process existing images with a real-time progress bar.
+A **Regenerate** button also appears in collection list views. By default it targets only unoptimized images (label reads `Regenerate N Unoptimized`, or `All images optimized` when nothing is pending). Selecting rows scopes it to just those. The full-collection "Force re-process all" opt-in is hidden unless you enable it via `regenerateButton: { allowForceAll: true }`.
 
 ## Displaying Images
 

@@ -10,6 +10,8 @@ type RegenerationProgress = {
   pending: number
 }
 
+type RegenerationStats = RegenerationProgress & { allowForceAll?: boolean }
+
 const POLL_INTERVAL_MS = 2000
 // With sequential processing each image takes ~4-5s, so no progress for 30s
 // (15 polls) strongly suggests a real stall rather than slow processing.
@@ -27,7 +29,8 @@ export const RegenerationButton: React.FC = () => {
   const [stalled, setStalled] = useState(false)
   const [cancelled, setCancelled] = useState(false)
   const [collectionSlug, setCollectionSlug] = useState<string | null>(null)
-  const [stats, setStats] = useState<RegenerationProgress | null>(null)
+  const [stats, setStats] = useState<RegenerationStats | null>(null)
+  const [allowForceAll, setAllowForceAll] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const stallRef = useRef({ lastProcessed: 0, stallCount: 0 })
@@ -50,8 +53,9 @@ export const RegenerationButton: React.FC = () => {
         `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
       )
       if (res.ok) {
-        const data: RegenerationProgress = await res.json()
+        const data: RegenerationStats = await res.json()
         setStats(data)
+        if (typeof data.allowForceAll === 'boolean') setAllowForceAll(data.allowForceAll)
       }
     } catch {
       // ignore stats fetch errors
@@ -136,8 +140,9 @@ export const RegenerationButton: React.FC = () => {
           `/api/image-optimizer/regenerate?collection=${collectionSlug}`,
         )
         if (!res.ok || cancelled) return
-        const data: RegenerationProgress = await res.json()
+        const data: RegenerationStats = await res.json()
         setStats(data)
+        if (typeof data.allowForceAll === 'boolean') setAllowForceAll(data.allowForceAll)
 
         // Resume polling only if the user triggered regeneration in this session
         const wasRunning = sessionStorage.getItem(SESSION_KEY) === collectionSlug
@@ -217,7 +222,8 @@ export const RegenerationButton: React.FC = () => {
     baselineRef.current = stats ? stats.complete + stats.errored : 0
 
     try {
-      const requestBody: Record<string, unknown> = { collectionSlug, force }
+      const effectiveForce = allowForceAll && force
+      const requestBody: Record<string, unknown> = { collectionSlug, force: effectiveForce }
       if (hasSelection) {
         requestBody.docIds = getSelectedIds().map(String)
       }
@@ -294,25 +300,38 @@ export const RegenerationButton: React.FC = () => {
         flexWrap: 'wrap',
       }}
     >
-      {!confirming && !isRunning && (
-        <button
-          onClick={handlePreflight}
-          style={{
-            backgroundColor: '#4f46e5',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '6px',
-            padding: '8px 16px',
-            fontSize: '14px',
-            fontWeight: 500,
-            cursor: 'pointer',
-          }}
-        >
-          {hasSelection
-            ? `Regenerate ${selectionCount} Selected`
-            : 'Regenerate All Images'}
-        </button>
-      )}
+      {!confirming && !isRunning && (() => {
+        const pending = stats?.pending ?? 0
+        // Primary action is scoped to what actually needs work. Force-all is an
+        // explicit opt-in via plugin config.
+        const nothingToDo =
+          !hasSelection && pending === 0 && !(allowForceAll && force)
+        const label = hasSelection
+          ? `Regenerate ${selectionCount} Selected`
+          : allowForceAll && force
+            ? `Re-process all ${stats?.total ?? 0} images`
+            : pending > 0
+              ? `Regenerate ${pending} Unoptimized`
+              : 'All images optimized'
+        return (
+          <button
+            onClick={handlePreflight}
+            disabled={nothingToDo}
+            style={{
+              backgroundColor: nothingToDo ? '#9ca3af' : '#4f46e5',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '8px 16px',
+              fontSize: '14px',
+              fontWeight: 500,
+              cursor: nothingToDo ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {label}
+          </button>
+        )
+      })()}
 
       {!confirming && isRunning && (
         <button
@@ -337,7 +356,7 @@ export const RegenerationButton: React.FC = () => {
           <span style={{ fontSize: '13px', color: '#374151' }}>
             {hasSelection
               ? `Regenerate ${selectionCount} selected image${selectionCount !== 1 ? 's' : ''}?`
-              : force
+              : allowForceAll && force
                 ? `Re-process all ${stats.total} images across the entire collection?`
                 : `Regenerate ${stats.pending} unoptimized image${stats.pending !== 1 ? 's' : ''} across the entire collection?`}
           </span>
@@ -374,7 +393,7 @@ export const RegenerationButton: React.FC = () => {
         </div>
       )}
 
-      {!confirming && (
+      {!confirming && allowForceAll && (
         <label
           style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
         >
