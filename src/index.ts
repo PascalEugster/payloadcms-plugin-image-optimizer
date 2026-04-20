@@ -101,23 +101,21 @@ export const imageOptimizer =
       }
 
       // adminThumbnail — when the user hasn't already set one on the collection.
-      // - 'auto' (default): function form that returns a URL from `doc.filename`,
-      //   surviving the v2 parent-extension change.
+      // - 'auto' (default): function form that returns Payload's canonical file
+      //   URL from `doc.filename`, surviving the v2 parent-extension change.
       // - string / function: pass through.
+      //
+      // Note: Payload's `upload.staticDir` is a filesystem path, not a URL
+      // prefix. The URL Payload serves files from is `/api/{slug}/file/{name}`
+      // (see the per-size `url` fields). We build that pattern here.
       if (userUpload.adminThumbnail === undefined) {
         const opt = resolvedConfig.adminThumbnail
         if (opt === 'auto') {
-          // Capture the upload base URL at init time so the closure doesn't
-          // depend on per-request state. Falls back to `/${slug}/` if the
-          // collection didn't declare an upload.staticDir.
-          const staticBase =
-            typeof userUpload.staticDir === 'string' && userUpload.staticDir
-              ? `/${String(userUpload.staticDir).replace(/^\/+|\/+$/g, '')}`
-              : `/${collection.slug}`
+          const slug = collection.slug
           injectedUpload.adminThumbnail = ({ doc }: { doc: Record<string, unknown> }) => {
             const filename = (doc as { filename?: string | null }).filename
             if (!filename) return null
-            return `${staticBase}/${filename}`
+            return `/api/${slug}/file/${filename}`
           }
         } else if (typeof opt === 'string' || typeof opt === 'function') {
           injectedUpload.adminThumbnail = opt

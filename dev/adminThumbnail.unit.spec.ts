@@ -31,27 +31,29 @@ const runPlugin = (
 }
 
 describe('adminThumbnail injection', () => {
-  test("'auto' (default) injects a function that returns a URL from doc.filename", () => {
+  test("'auto' (default) injects a function that returns Payload's canonical file URL from doc.filename", () => {
     const upload = runPlugin({ collections: { media: true } })
 
     expect(typeof upload.adminThumbnail).toBe('function')
 
     const fn = upload.adminThumbnail as (args: { doc: Record<string, unknown> }) => string | null
-    expect(fn({ doc: { filename: 'photo.webp' } })).toBe('/media/photo.webp')
-    expect(fn({ doc: { filename: 'nested-name.webp' } })).toBe('/media/nested-name.webp')
+    expect(fn({ doc: { filename: 'photo.webp' } })).toBe('/api/media/file/photo.webp')
+    expect(fn({ doc: { filename: 'nested-name.webp' } })).toBe('/api/media/file/nested-name.webp')
     // Survives extension change (the v2 motivation): same function works for
     // both .jpg and .webp because it reads `doc.filename` at runtime.
-    expect(fn({ doc: { filename: 'legacy.jpg' } })).toBe('/media/legacy.jpg')
+    expect(fn({ doc: { filename: 'legacy.jpg' } })).toBe('/api/media/file/legacy.jpg')
   })
 
-  test("'auto' falls back to /<slug>/ when no staticDir is configured", () => {
-    // No staticDir on the upload — the closure should fall back to the slug.
+  test("'auto' uses /api/<slug>/file/ pattern regardless of staticDir (which is a filesystem path, not a URL prefix)", () => {
+    // staticDir might be an absolute filesystem path; we still emit Payload's URL pattern.
     const result = imageOptimizer({ collections: { media: true } })({
-      collections: [{ slug: 'media', fields: [], upload: {} }],
+      collections: [
+        { slug: 'media', fields: [], upload: { staticDir: '/var/data/media-files' } },
+      ],
     } as any)
     const upload = (result.collections?.[0] as any).upload
     const fn = upload.adminThumbnail as (args: { doc: Record<string, unknown> }) => string | null
-    expect(fn({ doc: { filename: 'a.webp' } })).toBe('/media/a.webp')
+    expect(fn({ doc: { filename: 'a.webp' } })).toBe('/api/media/file/a.webp')
   })
 
   test("'auto' returns null when doc.filename is missing", () => {
