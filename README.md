@@ -161,6 +161,47 @@ imageOptimizer({
 
 **Limitations:** Only applies to single-file uploads in the admin panel. Bulk uploads and API/programmatic uploads are processed server-side as usual.
 
+### Logging
+
+The `imageOptimizer_regenerateDocument` task emits structured Pino records through `req.payload.logger`. Every record carries a stable `event` field for log-aggregator filtering and errors are serialized as `{ err }` so Pino's standard error serializer captures name/message/stack/cause.
+
+```ts
+imageOptimizer({
+  collections: { media: true },
+  logging: 'silent', // default — errors only
+})
+```
+
+| Mode | `enter` / `exit` | Errors | Doc details on exit | Skips logged |
+|---|---|---|---|---|
+| `'silent'` (default) | — | `error` | — | — |
+| `'normal'` | `info` | `error` | — | `user-cancelled` |
+| `'verbose'` | `info` | `error` | `filename` / `alt` / `mimeType` / `filesize` | all reasons |
+
+For fine-grained control, pass an object. It merges over the `'silent'` baseline:
+
+```ts
+imageOptimizer({
+  collections: { media: true },
+  logging: {
+    lifecycle: true,                // info enter/exit per job
+    errors: true,                   // default — set false to suppress
+    includeDocDetails: false,
+    skips: { userCancelled: true }, // or `true` / `false` shorthand for all reasons
+  },
+})
+```
+
+**Event tags** (stable — grep these):
+
+- `imageOpt.regen.enter` — job start, before the cancellation check.
+- `imageOpt.regen.exit` — job complete. Always carries `durationMs`.
+- `imageOpt.regen.skipped` — terminal skip. `reason` is `user-cancelled`, `doc-deleted`, or `not-image`.
+- `imageOpt.regen.error` — thrown inside the handler. Emitted **before** the status writeback, so the stack is captured regardless of whether the writeback itself succeeds.
+- `imageOpt.regen.writebackFailed` — the error-status writeback itself failed (secondary diagnostic; rare).
+
+Errors are emitted in every mode unless explicitly disabled (`logging: { errors: false }`). The steady-state cost of `'silent'` mode is zero log lines on the success path.
+
 ## How It Works
 
 1. **Plugin init** — The plugin resolves your options and injects them as native upload-config (`upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and per-`imageSize` `formatOptions`) on each targeted collection.

@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.3.0 — Configurable structured logging for the regeneration task
+
+`imageOptimizer_regenerateDocument` runs silently by default today. When it throws, the message lands in `imageOptimizer.error` on the document but the task-boundary error — with our collection/doc/duration context — never gets emitted by us. Downstream consumers have been working around this by wrapping the task handler in their own `onInit`. This release retires that workaround.
+
+### Added
+
+- **`logging` config option** — `'silent' | 'normal' | 'verbose'` or an object for fine-grained control. Defaults to `'silent'`: errors only, zero steady-state noise on the success path.
+- **Structured Pino records at each task boundary.** Every record carries a stable `event` field (`imageOpt.regen.enter` / `exit` / `skipped` / `error` / `writebackFailed`) for log-aggregator filtering. Errors pass the thrown value as `err` so Pino's std serializer captures name/message/stack/cause — no manual destructuring, no arbitrary stack truncation.
+- **`durationMs` on exit and error records**, captured at handler entry. Makes post-hoc latency-per-doc analysis trivial without hooking into the job runner's instrumentation.
+- **Per-reason skip gating.** `logging.skips` accepts a boolean shorthand or `{ userCancelled?, docDeleted?, notImage? }` — `'normal'` mode logs `user-cancelled` (rare + intentional) while staying quiet for `doc-deleted` (retry noise on deleted docs) and `not-image` (high-volume misrouted queue). `'verbose'` enables all three.
+
+### Changed
+
+- **Task-boundary error log now fires *before* the status writeback, regardless of whether the writeback succeeds.** Previously the only structured error emission was `req.payload.logger.error` on writeback failure — the primary error got re-thrown and was only captured by Payload's generic job-runner log without our context. The new `imageOpt.regen.error` event carries `collectionSlug` / `docId` / `durationMs` / `err`.
+- **Writeback failure gets its own event tag** (`imageOpt.regen.writebackFailed`) so log readers can distinguish "regen failed" from "regen failed AND we couldn't record it."
+- Default behavior change is **additive only**: `'silent'` default means the only net-new log lines in steady state are errors (which you want). Lifecycle noise is opt-in.
+
+### Downstream cleanup
+
+Sites currently monkey-patching `imageOptimizer_regenerateDocument` from `payload.config.ts` `onInit` to wrap it with `enter` / `exit` / `throw` logs can delete that code and set `logging: 'normal'` (or `'verbose'`) to get equivalent behavior with structured `event` tags.
+
+### Internal
+
+- New `resolveLogging()` in `src/defaults.ts`; `ResolvedLoggingConfig` added to `ResolvedImageOptimizerConfig`.
+- New `src/utilities/logger.ts` — `createRegenLogger(resolved, req)` with gated `enter` / `exit` / `skipped` / `error` methods. Keeps the task handler flat.
+- Tests: 116 unit + integration, all passing (19 new logger tests).
+
+---
+
 ## 3.2.0 — Parallel-wave regeneration on a dedicated job queue
 
 Bulk regeneration was the last serial hotspot. The POST endpoint previously kicked `payload.jobs.run({ limit: queued, sequential: true })` inside `waitUntil`, which executed every queued job one-at-a-time inside a single serverless invocation. For a cloud-storage collection (where each job is dominated by a fetch-then-upload round-trip), the CPU and connection pool sat ~90% idle per job, and the whole batch died at the first function timeout — typically around 100 docs on Vercel's 300s default.

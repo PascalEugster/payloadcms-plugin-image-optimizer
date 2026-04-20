@@ -1,17 +1,17 @@
 import type { CollectionSlug, Field } from 'payload';
-export type ImageFormat = 'webp' | 'avif';
+export type ImageFormat = 'avif' | 'webp';
 export type GenerateFilenameArgs = {
     /** Alt text from the document (if the collection has an `alt` field) */
     altText?: string;
-    /** Original uploaded filename (e.g., "IMG_2847.jpg") */
-    originalFilename: string;
-    /** The MIME type (e.g., "image/jpeg") */
-    mimeType: string;
     /** The collection slug this file belongs to */
     collectionSlug: string;
     /** Existing filename from a previous upload (set on re-uploads / focal point changes).
      *  Strategies should typically reuse this to avoid cloud storage churn. */
     existingFilename?: string;
+    /** The MIME type (e.g., "image/jpeg") */
+    mimeType: string;
+    /** Original uploaded filename (e.g., "IMG_2847.jpg") */
+    originalFilename: string;
 };
 /**
  * Custom filename generation function.
@@ -28,24 +28,65 @@ export type FormatQuality = {
 export type CollectionOptimizerConfig = {
     format?: FormatQuality;
     maxDimensions?: {
-        width: number;
         height: number;
+        width: number;
     };
 };
 export type FieldsOverride = (args: {
     defaultFields: Field[];
 }) => Field[];
 export type RegenerateButtonConfig = {
-    /** Whether the button is rendered at all. Defaults to `true`. */
-    enabled?: boolean;
     /** Expose the "Force re-process all" opt-in that reprocesses already-optimized
      * images across the whole collection. Defaults to `false` — the primary action
      * is always "Regenerate N Unoptimized" unless this is set to `true`. */
     allowForceAll?: boolean;
+    /** Whether the button is rendered at all. Defaults to `true`. */
+    enabled?: boolean;
 };
 export type ResolvedRegenerateButtonConfig = {
-    enabled: boolean;
     allowForceAll: boolean;
+    enabled: boolean;
+};
+/**
+ * Logging verbosity for the `imageOptimizer_regenerateDocument` task.
+ *
+ * - `'silent'` (default) — errors only. No per-job lifecycle output.
+ * - `'normal'` — lifecycle (enter/exit) at `info`, errors at `error`, and
+ *   user-cancelled skips. Recommended when bulk regenerations are rare.
+ * - `'verbose'` — adds doc details (filename/alt/mimeType/filesize) to `exit`
+ *   logs and enables all skip reasons.
+ * - object — merged over the `'silent'` baseline for fine-grained control.
+ *
+ * Errors are emitted in every mode unless `errors: false` is explicitly set on
+ * the object form. The primary value of this plugin's logging is structured
+ * error context at the task boundary — emitted *before* the status writeback,
+ * independent of whether that writeback succeeds.
+ */
+export type LoggingMode = 'normal' | 'silent' | 'verbose';
+/**
+ * Per-reason gating for `imageOpt.regen.skipped` logs. Shorthand: pass `true`
+ * (all reasons) or `false` (none) instead of an object.
+ */
+export type LoggingSkipsConfig = {
+    docDeleted?: boolean;
+    notImage?: boolean;
+    userCancelled?: boolean;
+};
+export type LoggingConfig = {
+    /** Emit `imageOpt.regen.error` at error level, before the status writeback. */
+    errors?: boolean;
+    /** Include `filename`, `alt`, `mimeType`, `filesize` on the exit log. */
+    includeDocDetails?: boolean;
+    /** Emit `imageOpt.regen.enter` and `imageOpt.regen.exit` at info level. */
+    lifecycle?: boolean;
+    /** Gate `imageOpt.regen.skipped` logs per-reason. `true`/`false` = all/none. */
+    skips?: boolean | LoggingSkipsConfig;
+};
+export type ResolvedLoggingConfig = {
+    errors: boolean;
+    includeDocDetails: boolean;
+    lifecycle: boolean;
+    skips: Required<LoggingSkipsConfig>;
 };
 /**
  * Metadata-keep policy. When set, takes precedence over the simple
@@ -75,9 +116,9 @@ export type MetadataPolicy = (args: {
  * Non-override rule: if the collection already has `upload.modifyResponseHeaders`,
  * the plugin leaves it untouched.
  */
-export type ResponseHeadersOption = false | 'immutable' | ((headers: Headers, args: {
+export type ResponseHeadersOption = 'immutable' | ((headers: Headers, args: {
     doc: unknown;
-}) => Headers | void);
+}) => Headers | void) | false;
 /**
  * `adminThumbnail` strategy injected on each targeted collection.
  *
@@ -92,11 +133,11 @@ export type ResponseHeadersOption = false | 'immutable' | ((headers: Headers, ar
  * Non-override rule: if the collection already has `upload.adminThumbnail`, the
  * plugin leaves it untouched.
  */
-export type AdminThumbnailOption = 'auto' | string | ((args: {
+export type AdminThumbnailOption = 'auto' | ((args: {
     doc: {
-        filename?: string | null;
+        filename?: null | string;
     };
-}) => string | null | undefined);
+}) => null | string | undefined) | string;
 export type ImageOptimizerConfig = {
     /** Inject an `adminThumbnail` for targeted collections.
      *
@@ -109,7 +150,7 @@ export type ImageOptimizerConfig = {
      * Non-override: respects an existing `upload.adminThumbnail`. */
     adminThumbnail?: AdminThumbnailOption;
     clientOptimization?: boolean;
-    collections: Partial<Record<CollectionSlug, true | CollectionOptimizerConfig>>;
+    collections: Partial<Record<CollectionSlug, CollectionOptimizerConfig | true>>;
     disabled?: boolean;
     fieldsOverride?: FieldsOverride;
     /** Target format for the uploaded image. When set, the plugin injects
@@ -142,9 +183,19 @@ export type ImageOptimizerConfig = {
      */
     generateFilename?: GenerateFilename;
     generateThumbHash?: boolean;
+    /** Lifecycle logging for the `imageOptimizer_regenerateDocument` task.
+     *
+     * - `'silent'` (default) — errors only.
+     * - `'normal'` — lifecycle (enter/exit) + errors + user-cancelled skips.
+     * - `'verbose'` — adds doc details on exit + all skip reasons.
+     * - object — fine-grained control, merged over the `'silent'` baseline.
+     *
+     * Errors are always emitted unless explicitly disabled via the object form
+     * (`{ errors: false }`). Logs flow through `req.payload.logger` (Pino). */
+    logging?: LoggingConfig | LoggingMode;
     maxDimensions?: {
-        width: number;
         height: number;
+        width: number;
     };
     /** Richer metadata-keep policy. When set, takes precedence over `stripMetadata`.
      * Passed through as Payload's `withMetadata` callback.
@@ -185,11 +236,11 @@ export type ResolvedCollectionOptimizerConfig = {
     /** Null means "do not convert format" — preserve original extension. */
     format: FormatQuality | null;
     maxDimensions: {
-        width: number;
         height: number;
+        width: number;
     };
 };
-export type ResolvedImageOptimizerConfig = Required<Pick<ImageOptimizerConfig, 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>> & {
+export type ResolvedImageOptimizerConfig = {
     /** Resolved adminThumbnail option. Defaults to `'auto'`. */
     adminThumbnail: AdminThumbnailOption;
     clientOptimization: boolean;
@@ -199,32 +250,34 @@ export type ResolvedImageOptimizerConfig = Required<Pick<ImageOptimizerConfig, '
     format: FormatQuality | null;
     /** Resolved filename generator. `undefined` means keep original filename. */
     generateFilename?: GenerateFilename;
+    /** Resolved logging config. Defaults to the `'silent'` preset. */
+    logging: ResolvedLoggingConfig;
     /** Resolved metadata-keep policy. When set, takes precedence over `stripMetadata`. */
     metadataPolicy?: MetadataPolicy;
     regenerateButton: ResolvedRegenerateButtonConfig;
     /** Resolved response-header policy. Defaults to `false`. */
     responseHeaders: ResponseHeadersOption;
-};
+} & Required<Pick<ImageOptimizerConfig, 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>>;
 export type ImageOptimizerData = {
-    thumbHash?: string | null;
+    thumbHash?: null | string;
 };
 export type MediaSizeVariant = {
-    url?: string | null;
-    width?: number | null;
-    height?: number | null;
-    mimeType?: string | null;
-    filesize?: number | null;
-    filename?: string | null;
+    filename?: null | string;
+    filesize?: null | number;
+    height?: null | number;
+    mimeType?: null | string;
+    url?: null | string;
+    width?: null | number;
 };
 export type MediaResource = {
-    url?: string | null;
-    alt?: string | null;
-    width?: number | null;
-    height?: number | null;
-    filename?: string | null;
-    focalX?: number | null;
-    focalY?: number | null;
+    alt?: null | string;
+    filename?: null | string;
+    focalX?: null | number;
+    focalY?: null | number;
+    height?: null | number;
     imageOptimizer?: ImageOptimizerData | null;
-    updatedAt?: string;
     sizes?: Record<string, MediaSizeVariant | undefined>;
+    updatedAt?: string;
+    url?: null | string;
+    width?: null | number;
 };

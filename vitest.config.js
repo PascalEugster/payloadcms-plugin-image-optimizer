@@ -29,6 +29,7 @@ export default defineConfig(() => {
         'dev/metadataPolicy.unit.spec.ts',
         'dev/clientResize.unit.spec.ts',
         'dev/filenameStrategies.unit.spec.ts',
+        'dev/logger.unit.spec.ts',
       ],
     },
   }

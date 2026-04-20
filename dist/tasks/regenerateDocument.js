@@ -1,4 +1,5 @@
 import path from 'path';
+import { createRegenLogger } from '../utilities/logger.js';
 import { fetchFileBuffer } from '../utilities/storage.js';
 const GLOBAL_SLUG = 'image-optimizer-state';
 /**
@@ -19,7 +20,9 @@ const GLOBAL_SLUG = 'image-optimizer-state';
 const cancelCache = new Map();
 async function isCancelled(req, collectionSlug) {
     const cached = cancelCache.get(collectionSlug);
-    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
     try {
         const state = await req.payload.findGlobal({
             slug: GLOBAL_SLUG
@@ -27,8 +30,8 @@ async function isCancelled(req, collectionSlug) {
         const collState = state?.collections?.[collectionSlug];
         const value = !!(collState?.cancelledAt && collState.cancelledAt > (collState.startedAt ?? 0));
         cancelCache.set(collectionSlug, {
-            value,
-            expiresAt: Date.now() + CANCEL_CACHE_TTL_MS
+            expiresAt: Date.now() + CANCEL_CACHE_TTL_MS,
+            value
         });
         return value;
     } catch  {
@@ -54,22 +57,33 @@ async function isCancelled(req, collectionSlug) {
  * keep retrying, and the catch-block error writeback doesn't double-log.
  */ export const createRegenerateDocumentHandler = (resolvedConfig)=>{
     return async ({ input, req })=>{
+        const startedAt = Date.now();
+        const logger = createRegenLogger(resolvedConfig.logging, req);
+        const logCtx = {
+            collectionSlug: input.collectionSlug,
+            docId: input.docId
+        };
+        logger.enter(logCtx);
         try {
             // Cancellation check — cached per-process so a wave of parallel jobs
             // doesn't all hit `findGlobal` simultaneously.
             if (await isCancelled(req, input.collectionSlug)) {
+                logger.skipped({
+                    ...logCtx,
+                    reason: 'user-cancelled'
+                });
                 return {
                     output: {
-                        status: 'cancelled',
-                        reason: 'user-cancelled'
+                        reason: 'user-cancelled',
+                        status: 'cancelled'
                     }
                 };
             }
             let doc;
             try {
                 doc = await req.payload.findByID({
-                    collection: input.collectionSlug,
                     id: input.docId,
+                    collection: input.collectionSlug,
                     // depth: 0 — we only read scalar fields here (mimeType, filename,
                     // url, imageOptimizer). Default depth (2) populates every relation
                     // on the doc — including nested folder hierarchies — which on
@@ -84,10 +98,14 @@ async function isCancelled(req, collectionSlug) {
                     // Stale retry for a doc that was deleted after the job was queued.
                     // Return terminal skip — no throw means no further retries, no
                     // noise in the logs for something we can't recover from.
+                    logger.skipped({
+                        ...logCtx,
+                        reason: 'doc-deleted'
+                    });
                     return {
                         output: {
-                            status: 'skipped',
-                            reason: 'doc-deleted'
+                            reason: 'doc-deleted',
+                            status: 'skipped'
                         }
                     };
                 }
@@ -95,10 +113,14 @@ async function isCancelled(req, collectionSlug) {
             }
             // Skip non-image documents
             if (!doc.mimeType || !doc.mimeType.startsWith('image/')) {
+                logger.skipped({
+                    ...logCtx,
+                    reason: 'not-image'
+                });
                 return {
                     output: {
-                        status: 'skipped',
-                        reason: 'not-image'
+                        reason: 'not-image',
+                        status: 'skipped'
                     }
                 };
             }
@@ -119,22 +141,22 @@ async function isCancelled(req, collectionSlug) {
             //
             // For cloud storage the same call re-uploads via the adapter's hook.
             await req.payload.update({
-                collection: input.collectionSlug,
                 id: input.docId,
+                collection: input.collectionSlug,
                 // depth: 0 — skip re-hydrating the updated doc's relations in the
                 // response. We don't use the return value; the hook writes through
                 // to the DB and the admin UI polls for the fresh state separately.
                 // Pairs with the depth: 0 on findByID above.
-                depth: 0,
                 data: typeof carriedOriginalSize === 'number' ? {
                     imageOptimizer: {
                         originalSize: carriedOriginalSize
                     }
                 } : {},
+                depth: 0,
                 file: {
+                    name: safeFilename,
                     data: fileBuffer,
                     mimetype: doc.mimeType,
-                    name: safeFilename,
                     size: fileBuffer.length
                 },
                 // overwriteExistingFiles avoids the safe-filename suffix dance — we
@@ -146,6 +168,11 @@ async function isCancelled(req, collectionSlug) {
                     imageOptimizer_regenerating: true
                 }
             });
+            logger.exit({
+                ...logCtx,
+                doc,
+                startedAt
+            });
             return {
                 output: {
                     status: 'complete'
@@ -156,38 +183,56 @@ async function isCancelled(req, collectionSlug) {
             // treat as a terminal skip — same as the findByID NotFound path above.
             // Prevents retry-spam for an unrecoverable state.
             if (isNotFound(err)) {
+                logger.skipped({
+                    ...logCtx,
+                    reason: 'doc-deleted'
+                });
                 return {
                     output: {
-                        status: 'skipped',
-                        reason: 'doc-deleted'
+                        reason: 'doc-deleted',
+                        status: 'skipped'
                     }
                 };
             }
+            // Emit the task-boundary error log *before* the status writeback so the
+            // stack/cause is captured regardless of whether the writeback succeeds.
+            // This is the whole point of the plugin-owned logging: the outer
+            // `throw err` below does hit Payload's job-runner logs, but without our
+            // collectionSlug / docId / durationMs context.
+            logger.error({
+                ...logCtx,
+                err,
+                startedAt
+            });
             const errorMessage = err instanceof Error ? err.message : String(err);
             try {
                 await req.payload.update({
-                    collection: input.collectionSlug,
                     id: input.docId,
-                    depth: 0,
-                    data: {
-                        imageOptimizer: {
-                            status: 'error',
-                            error: errorMessage
-                        }
-                    },
+                    collection: input.collectionSlug,
                     context: {
                         imageOptimizer_skip: true
-                    }
+                    },
+                    data: {
+                        imageOptimizer: {
+                            error: errorMessage,
+                            status: 'error'
+                        }
+                    },
+                    depth: 0
                 });
             } catch (updateErr) {
                 // Suppress the double-log when the error-writeback also hits a
                 // NotFound — nothing to persist to, and the outer throw would be
-                // retried anyway. For other update failures, keep the log.
-                if (!isNotFound(updateErr)) {
+                // retried anyway. For other writeback failures, emit under a
+                // separate event tag so log readers can distinguish "regen failed"
+                // from "regen failed AND we couldn't record it". This log is gated
+                // by the same `logging.errors` flag as the primary error above.
+                if (!isNotFound(updateErr) && resolvedConfig.logging.errors) {
                     req.payload.logger.error({
-                        err: updateErr,
+                        collectionSlug: input.collectionSlug,
                         docId: input.docId,
-                        collectionSlug: input.collectionSlug
+                        err: updateErr,
+                        event: 'imageOpt.regen.writebackFailed'
                     }, 'Failed to persist error status for image optimizer regeneration');
                 }
             }

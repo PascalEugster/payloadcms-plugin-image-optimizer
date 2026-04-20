@@ -24,8 +24,8 @@ export declare const createRegenerateDocumentHandler: (resolvedConfig: ResolvedI
     req: any;
 }) => Promise<{
     output: {
-        status: string;
         reason: string;
+        status: string;
     };
 } | {
     output: {
