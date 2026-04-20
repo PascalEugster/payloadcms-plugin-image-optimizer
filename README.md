@@ -150,15 +150,15 @@ imageOptimizer({
 
 **Limitations:** Only applies to single-file uploads in the admin panel. Bulk uploads and API/programmatic uploads are processed server-side as usual.
 
-## How It Works
+## How It Works (v2)
 
-1. **Upload** — An image is uploaded to a configured collection
-2. **Pre-process** — A single-pass sharp pipeline strips metadata, resizes, and optionally converts format — all in one operation
-3. **Save** — Payload writes the optimized image to disk
-4. **Convert** — A background job converts the image to additional format variants (e.g. AVIF) and generates the ThumbHash asynchronously
-5. **Done** — The document is updated with variant URLs, file sizes, ThumbHash, and optimization status
+1. **Plugin init** — The plugin resolves your options and injects them as native upload-config (`upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and per-`imageSize` `formatOptions`) on each targeted collection.
+2. **Upload** — Payload's own `generateFileData()` runs your image through sharp once: resize to `maxDimensions`, convert to the primary format (e.g. WebP), strip metadata, generate every `imageSize` variant — all in the format you configured.
+3. **Hooks** — A small `beforeChange` hook stamps the `imageOptimizer` group (originalSize / optimizedSize / status / ThumbHash) and applies your optional filename strategy.
+4. **Additive variants** — When you configure more than one format (e.g. WebP primary + AVIF), a background job produces the additive formats and updates the doc.
+5. **Done** — The document carries variant URLs, file sizes, ThumbHash, and status.
 
-Format conversion and ThumbHash generation run as async background jobs, so uploads return immediately.
+This delegates the heavy lifting to Payload's native pipeline — single-format mode adds essentially zero overhead vs stock Payload.
 
 ### Vercel / Serverless Deployment
 
@@ -213,7 +213,7 @@ vercelBlobStorage({
 
 ## How It Differs from Payload's Default Image Handling
 
-Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and can resize images and generate sizes on upload. This plugin optimizes the uploaded image in a `beforeChange` hook and writes the result back to `req.file.data`. Payload's `generateFileData` runs before hooks and handles `imageSizes` generation using `Promise.all`, so the plugin focuses on what Payload doesn't do natively: format conversion (WebP/AVIF), metadata stripping, and ThumbHash generation. Using `clientOptimization: true` (the default) is the most effective way to speed up uploads with many `imageSizes`, since it reduces the source image before Payload processes it.
+Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and exposes `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and per-`imageSize` `formatOptions`. v2 of this plugin **resolves your options and injects them onto Payload's upload config at init time**, then leans on `generateFileData()` to do the actual encoding. The plugin only owns what Payload doesn't do natively: ThumbHash placeholders, optimization status, optional filename strategies (UUID / SEO), additive multi-format variants, and the regenerate UI. Using `clientOptimization: true` (the default) further reduces server work for big uploads.
 
 ### Comparison
 
