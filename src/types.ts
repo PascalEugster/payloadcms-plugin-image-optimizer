@@ -52,7 +52,35 @@ export type ResolvedRegenerateButtonConfig = {
   allowForceAll: boolean
 }
 
+/**
+ * `adminThumbnail` strategy injected on each targeted collection.
+ *
+ * - `'auto'` (default) — inject a function form that returns a URL derived from
+ *   `doc.filename`. Survives the parent-file extension change that v2 introduces
+ *   when `replaceOriginal: true` (e.g. `.jpg` → `.webp`), where a hand-written
+ *   string-name reference like `'thumbnail'` would still work but a custom URL
+ *   helper might break.
+ * - `string` — passed through to Payload as a size-name reference (e.g. `'thumbnail'`).
+ * - function — passed through to Payload as-is.
+ *
+ * Non-override rule: if the collection already has `upload.adminThumbnail`, the
+ * plugin leaves it untouched.
+ */
+export type AdminThumbnailOption =
+  | 'auto'
+  | string
+  | ((args: { doc: { filename?: string | null } }) => string | null | undefined)
+
 export type ImageOptimizerConfig = {
+  /** Inject an `adminThumbnail` for targeted collections.
+   *
+   * - `'auto'` (default) — inject a function that returns the file URL from
+   *   `doc.filename`, surviving the v2 parent-extension change.
+   * - string — pass through as a size-name reference.
+   * - function — pass through as-is.
+   *
+   * Non-override: respects an existing `upload.adminThumbnail`. */
+  adminThumbnail?: AdminThumbnailOption
   clientOptimization?: boolean
   collections: Partial<Record<CollectionSlug, true | CollectionOptimizerConfig>>
   disabled?: boolean
@@ -106,6 +134,8 @@ export type ResolvedCollectionOptimizerConfig = {
 export type ResolvedImageOptimizerConfig = Required<
   Pick<ImageOptimizerConfig, 'formats' | 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>
 > & {
+  /** Resolved adminThumbnail option. Defaults to `'auto'`. */
+  adminThumbnail: AdminThumbnailOption
   clientOptimization: boolean
   collections: ImageOptimizerConfig['collections']
   disabled: boolean

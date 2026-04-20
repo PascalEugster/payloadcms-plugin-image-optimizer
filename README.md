@@ -105,6 +105,7 @@ imageOptimizer({
 | `uniqueFileNames` | `boolean` | `false` | Replace filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`). Prevents Vercel Blob "already exists" errors on uploads and regeneration. |
 | `clientOptimization` | `boolean` | `true` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
 | `regenerateButton` | `boolean \| { enabled?: boolean, allowForceAll?: boolean }` | `true` | Controls the regeneration UI. `false` hides it entirely. Pass an object to opt in to the `Force re-process all` checkbox (`allowForceAll: true`) — off by default so the primary action is always "Regenerate N Unoptimized". |
+| `adminThumbnail` | `'auto' \| string \| function` | `'auto'` | Injects an `upload.adminThumbnail` on each targeted collection. `'auto'` emits a function that returns a URL from `doc.filename` so admin thumbnails survive the v2 parent-extension change (`.jpg` → `.webp`). String mode is treated as a size-name reference; function mode is passed through. Respects user-set values. |
 | `disabled` | `boolean` | `false` | Disable optimization while keeping schema fields intact. |
 
 ### Per-Collection Overrides

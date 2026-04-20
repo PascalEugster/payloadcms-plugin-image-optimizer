@@ -32,6 +32,7 @@ const resolveGenerateFilename = (config: ImageOptimizerConfig) => {
 }
 
 export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimizerConfig => ({
+  adminThumbnail: config.adminThumbnail ?? 'auto',
   clientOptimization: config.clientOptimization ?? true,
   collections: config.collections,
   disabled: config.disabled ?? false,

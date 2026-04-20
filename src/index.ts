@@ -95,6 +95,30 @@ export const imageOptimizer =
         injectedUpload.withMetadata = false
       }
 
+      // adminThumbnail — when the user hasn't already set one on the collection.
+      // - 'auto' (default): function form that returns a URL from `doc.filename`,
+      //   surviving the v2 parent-extension change.
+      // - string / function: pass through.
+      if (userUpload.adminThumbnail === undefined) {
+        const opt = resolvedConfig.adminThumbnail
+        if (opt === 'auto') {
+          // Capture the upload base URL at init time so the closure doesn't
+          // depend on per-request state. Falls back to `/${slug}/` if the
+          // collection didn't declare an upload.staticDir.
+          const staticBase =
+            typeof userUpload.staticDir === 'string' && userUpload.staticDir
+              ? `/${String(userUpload.staticDir).replace(/^\/+|\/+$/g, '')}`
+              : `/${collection.slug}`
+          injectedUpload.adminThumbnail = ({ doc }: { doc: Record<string, unknown> }) => {
+            const filename = (doc as { filename?: string | null }).filename
+            if (!filename) return null
+            return `${staticBase}/${filename}`
+          }
+        } else if (typeof opt === 'string' || typeof opt === 'function') {
+          injectedUpload.adminThumbnail = opt
+        }
+      }
+
       // Per-size format conversion — inject formatOptions on each imageSize that
       // doesn't already have one. Payload's createImageSizes derives the size
       // filename extension from the produced buffer's MIME type, so injecting

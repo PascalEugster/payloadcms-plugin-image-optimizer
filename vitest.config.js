@@ -24,6 +24,7 @@ export default defineConfig(() => {
         'dev/int.spec.ts',
         'dev/responsiveImage.unit.spec.ts',
         'dev/regenerateSlugGuard.unit.spec.ts',
+        'dev/adminThumbnail.unit.spec.ts',
       ],
     },
   }

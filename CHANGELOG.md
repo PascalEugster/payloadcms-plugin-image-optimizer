@@ -33,6 +33,10 @@ Running sharp ourselves duplicated work Payload already did, fought with cloud-s
 
 Bump the dependency. No code changes needed for typical setups. If you have pre-existing `formatOptions` / `resizeOptions` on a Payload upload collection, the plugin will respect them — or remove them and let the plugin manage them via its own config.
 
+### Additional config-injection options (additive, non-breaking)
+
+- **`adminThumbnail`** — `'auto' | string | function`, defaults to `'auto'`. The `'auto'` mode injects a function that returns a URL from `doc.filename`, so admin thumbnails survive the v2 parent-extension change (e.g. `.jpg` → `.webp`). String and function modes pass through to Payload as-is. Honors the non-override rule.
+
 ---
 
 ## 1.12.1
