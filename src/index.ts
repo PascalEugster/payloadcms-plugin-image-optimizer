@@ -90,9 +90,14 @@ export const imageOptimizer =
         }
       }
 
-      // Strip metadata (Payload default keeps metadata; false strips it)
-      if (resolvedConfig.stripMetadata && userUpload.withMetadata === undefined) {
-        injectedUpload.withMetadata = false
+      // Metadata policy — `metadataPolicy` (callback) takes precedence over the
+      // simple `stripMetadata` boolean. Both honor the non-override rule.
+      if (userUpload.withMetadata === undefined) {
+        if (resolvedConfig.metadataPolicy) {
+          injectedUpload.withMetadata = resolvedConfig.metadataPolicy
+        } else if (resolvedConfig.stripMetadata) {
+          injectedUpload.withMetadata = false
+        }
       }
 
       // adminThumbnail — when the user hasn't already set one on the collection.
@@ -160,6 +165,15 @@ export const imageOptimizer =
       // doesn't already have one. Payload's createImageSizes derives the size
       // filename extension from the produced buffer's MIME type, so injecting
       // formatOptions causes sizes to land as `.webp` automatically.
+      //
+      // TODO(generateImageName): a richer per-size custom-naming injection was
+      // descoped because Payload's `generateImageName` callback runs without
+      // access to the document `data` (no altText, no MIME type beyond what
+      // can be derived from `extension`). The user's `generateFilename`
+      // strategies (especially `seoFilename`) need that runtime context to
+      // produce meaningful names. Without it the only safe option is to derive
+      // size names from the parent's `originalName`, which Payload already does
+      // by default. Revisit if/when Payload exposes `data` to `generateImageName`.
       if (primaryFormat && Array.isArray(userUpload.imageSizes)) {
         injectedUpload.imageSizes = (userUpload.imageSizes as Array<Record<string, unknown>>).map(
           (size) => {

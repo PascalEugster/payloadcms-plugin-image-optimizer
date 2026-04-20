@@ -53,6 +53,18 @@ export type ResolvedRegenerateButtonConfig = {
 }
 
 /**
+ * Metadata-keep policy. When set, takes precedence over the simple
+ * `stripMetadata: boolean` toggle and is passed through as Payload's
+ * `withMetadata` callback.
+ *
+ * Return `true` to KEEP metadata for this image, `false` to strip it.
+ *
+ * Non-override rule: if the collection already has `upload.withMetadata`, the
+ * plugin leaves it untouched.
+ */
+export type MetadataPolicy = (args: { metadata: any; req: any }) => boolean | Promise<boolean>
+
+/**
  * Response header policy applied to file responses for targeted collections.
  *
  * - `false` (default) — do nothing.
@@ -128,6 +140,22 @@ export type ImageOptimizerConfig = {
   generateFilename?: GenerateFilename
   generateThumbHash?: boolean
   maxDimensions?: { width: number; height: number }
+  /** Richer metadata-keep policy. When set, takes precedence over `stripMetadata`.
+   * Passed through as Payload's `withMetadata` callback.
+   *
+   * Return `true` to KEEP metadata, `false` to strip.
+   *
+   * Non-override: respects an existing `upload.withMetadata`.
+   *
+   * @example
+   * ```ts
+   * imageOptimizer({
+   *   collections: { media: true },
+   *   metadataPolicy: ({ metadata }) => metadata.format === 'jpeg', // keep EXIF on JPEGs only
+   * })
+   * ```
+   */
+  metadataPolicy?: MetadataPolicy
   /** Regeneration button config for the collection list view.
    *
    * - `true` (default) — show the button; default action is "Regenerate N Unoptimized".
@@ -170,6 +198,8 @@ export type ResolvedImageOptimizerConfig = Required<
   disabled: boolean
   /** Resolved filename generator. `undefined` means keep original filename. */
   generateFilename?: GenerateFilename
+  /** Resolved metadata-keep policy. When set, takes precedence over `stripMetadata`. */
+  metadataPolicy?: MetadataPolicy
   regenerateButton: ResolvedRegenerateButtonConfig
   replaceOriginal: boolean
   /** Resolved response-header policy. Defaults to `false`. */

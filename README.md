@@ -4,23 +4,29 @@
 [![npm downloads](https://img.shields.io/npm/dm/@inoo-ch/payload-image-optimizer)](https://www.npmjs.com/package/@inoo-ch/payload-image-optimizer)
 [![GitHub](https://img.shields.io/github/license/PascalEugster/payloadcms-plugin-image-optimizer)](https://github.com/PascalEugster/payloadcms-plugin-image-optimizer)
 
-A [Payload CMS](https://payloadcms.com) plugin for automatic image optimization. Converts uploads to WebP/AVIF, resizes to configurable limits, strips EXIF metadata, generates [ThumbHash](https://evanw.github.io/thumbhash/) blur placeholders, and provides bulk regeneration from the admin panel.
+A [Payload CMS](https://payloadcms.com) plugin that layers a turnkey image-optimization workflow on top of Payload's native sharp pipeline — zero-config multi-format output, ThumbHash blur placeholders, bulk regeneration UI, client-side pre-resize, and Next.js display components.
 
 Built and maintained by [inoo.ch](https://inoo.ch) — a Swiss digital agency crafting modern web experiences.
 
-## Features
+## What This Plugin Adds
 
-- **Format conversion** — Automatically generates WebP and AVIF variants with configurable quality
-- **Smart resizing** — Constrains images to max dimensions while preserving aspect ratio
-- **EXIF stripping** — Removes metadata for smaller files and better privacy
-- **ThumbHash placeholders** — Generates tiny blur hashes for instant image previews
-- **Bulk regeneration** — Re-process existing images from the admin UI with progress tracking
-- **Per-collection config** — Override formats, quality, and dimensions per collection
-- **Admin UI** — Status badges, file size savings, and blur previews in the sidebar
-- **ImageBox component** — Drop-in Next.js `<Image>` wrapper with ThumbHash blur, fade-in, responsive variant loading, and smart `sizes` defaults
-- **Responsive variant loader** — Serves pre-generated Payload size variants directly, bypassing `/_next/image` re-optimization
-- **Template-friendly** — `getOptimizedImageProps()` integrates with the Payload website template in 3 lines
-- **FadeImage component** — Standalone fade-in image for custom setups using `getImageOptimizerProps()`
+Payload already ships with sharp and exposes `formatOptions`, `resizeOptions`, `imageSizes`, and `withMetadata` — so format conversion, resizing, and EXIF stripping are achievable natively with per-collection wiring. This plugin's value is the layer *around* that pipeline: sensible coordinated defaults, admin UX, frontend integration, and workflows Payload does not provide.
+
+### Things Payload can do natively (this plugin makes them turnkey)
+
+- **Coordinated multi-format output** — WebP + AVIF + original as additive variants via a single config block, instead of hand-rolling `formatOptions` across `imageSizes`.
+- **Global + per-collection defaults** — Configure once, override per collection, without repeating `formatOptions`/`resizeOptions`/`withMetadata` on every upload config.
+- **Opinionated defaults** — WebP at quality 80, max 2560×2560, EXIF stripped, sensible quality ladder — wired up on install.
+
+### Things Payload does not do out of the box
+
+- **ThumbHash blur placeholders** — Tiny base64 hashes generated per image for instant blur-up previews.
+- **Bulk regeneration UI** — One-click reprocess-all or reprocess-unoptimized from the admin, with progress tracking and a REST API.
+- **Optimization status panel** — Admin sidebar showing status, original vs. optimized size, savings %, variant list, and blur preview.
+- **Client-side pre-resize** — Canvas-based resize in the browser before upload, cutting 12MB DSLR photos to ~100–500KB pre-upload (huge win with `clientUploads: true`).
+- **Filename strategies** — UUID filenames to avoid Vercel Blob "already exists" collisions during regeneration.
+- **Next.js display components** — `<ImageBox>` and `<FadeImage>` wrappers with ThumbHash blur, fade-in, focal point, and a responsive variant loader that serves pre-generated `imageSizes` variants directly (bypassing `/_next/image` re-optimization).
+- **Template integration helper** — `getOptimizedImageProps()` adds ThumbHash + focal point + variant loader to the Payload website template's `<NextImage>` in 3 lines.
 
 ## Requirements
 
@@ -90,6 +96,11 @@ imageOptimizer({
   stripMetadata: true,
   clientOptimization: true,
   disabled: false,
+
+  // Optional config-injection helpers (all opt-in, all honor user-set upload values)
+  adminThumbnail: 'auto',         // function form survives .jpg → .webp parent rename
+  // responseHeaders: 'immutable', // long-lived Cache-Control; pair with `generateFilename`
+  // metadataPolicy: ({ metadata }) => metadata.format === 'jpeg', // richer than stripMetadata
 })
 ```
 
@@ -107,6 +118,7 @@ imageOptimizer({
 | `regenerateButton` | `boolean \| { enabled?: boolean, allowForceAll?: boolean }` | `true` | Controls the regeneration UI. `false` hides it entirely. Pass an object to opt in to the `Force re-process all` checkbox (`allowForceAll: true`) — off by default so the primary action is always "Regenerate N Unoptimized". |
 | `adminThumbnail` | `'auto' \| string \| function` | `'auto'` | Injects an `upload.adminThumbnail` on each targeted collection. `'auto'` emits a function that returns a URL from `doc.filename` so admin thumbnails survive the v2 parent-extension change (`.jpg` → `.webp`). String mode is treated as a size-name reference; function mode is passed through. Respects user-set values. |
 | `responseHeaders` | `false \| 'immutable' \| function` | `false` | Opt-in `upload.modifyResponseHeaders` injection. `'immutable'` sets `Cache-Control: public, max-age=31536000, immutable` — only safe with content-stable filenames (`generateFilename`); otherwise the plugin warns at init. Function mode is passed through. Respects user-set values. |
+| `metadataPolicy` | `({ metadata, req }) => boolean \| Promise<boolean>` | — | Richer alternative to `stripMetadata`. When set, passed through as `withMetadata` (return `true` to keep, `false` to strip). Takes precedence over `stripMetadata`. Respects user-set values. |
 | `disabled` | `boolean` | `false` | Disable optimization while keeping schema fields intact. |
 
 ### Per-Collection Overrides

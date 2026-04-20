@@ -42,6 +42,7 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   generateFilename: resolveGenerateFilename(config),
   generateThumbHash: config.generateThumbHash ?? true,
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
+  metadataPolicy: config.metadataPolicy,
   regenerateButton: resolveRegenerateButton(config.regenerateButton),
   replaceOriginal: config.replaceOriginal ?? true,
   responseHeaders: config.responseHeaders ?? false,

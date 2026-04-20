@@ -26,6 +26,7 @@ export default defineConfig(() => {
         'dev/regenerateSlugGuard.unit.spec.ts',
         'dev/adminThumbnail.unit.spec.ts',
         'dev/responseHeaders.unit.spec.ts',
+        'dev/metadataPolicy.unit.spec.ts',
         'dev/clientResize.unit.spec.ts',
       ],
     },
