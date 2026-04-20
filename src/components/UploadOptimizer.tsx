@@ -1,63 +1,20 @@
 'use client'
 
-import React, { useCallback, useEffect, useRef } from 'react'
-import { Upload, useDocumentInfo, useField } from '@payloadcms/ui'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { Upload, useDocumentInfo, useField, useTranslation } from '@payloadcms/ui'
 
-const MAX_WIDTH = 2560
-const MAX_HEIGHT = 2560
-const JPEG_QUALITY = 0.85
-
-const RESIZABLE_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/bmp',
-  'image/tiff',
-])
-
-async function resizeImage(file: File): Promise<File> {
-  if (!RESIZABLE_TYPES.has(file.type)) return file
-
-  const bitmap = await createImageBitmap(file)
-  const { width, height } = bitmap
-
-  if (width <= MAX_WIDTH && height <= MAX_HEIGHT) {
-    bitmap.close()
-    return file
-  }
-
-  const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height)
-  const targetWidth = Math.round(width * ratio)
-  const targetHeight = Math.round(height * ratio)
-
-  const canvas = document.createElement('canvas')
-  canvas.width = targetWidth
-  canvas.height = targetHeight
-  const ctx = canvas.getContext('2d')!
-  ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight)
-  bitmap.close()
-
-  // Keep PNG for transparency, convert everything else to JPEG
-  const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
-  const quality = outputType === 'image/jpeg' ? JPEG_QUALITY : undefined
-  const ext = outputType === 'image/png' ? 'png' : 'jpg'
-
-  const blob = await new Promise<Blob>((resolve) => {
-    canvas.toBlob((b) => resolve(b!), outputType, quality)
-  })
-
-  const baseName = file.name.replace(/\.[^.]+$/, '')
-  return new File([blob], `${baseName}.${ext}`, {
-    type: outputType,
-    lastModified: Date.now(),
-  })
-}
+import { resizeImage } from '../utilities/clientResize.js'
 
 export const UploadOptimizer: React.FC = () => {
-  const { collectionSlug, docConfig, initialState } = useDocumentInfo()
+  const { collectionSlug, docConfig, initialState, setUploadStatus } = useDocumentInfo()
   const uploadConfig = docConfig && 'upload' in docConfig ? docConfig.upload : undefined
   const { value: fileValue, setValue: setFileValue } = useField<File | null>({ path: 'file' })
   const processedFiles = useRef(new WeakSet<File>())
+  const [optimizing, setOptimizing] = useState(false)
+  const { t } = useTranslation()
+  const optimizingLabel =
+    (t as unknown as (key: string) => string)('plugin-imageOptimizer:optimizing') ||
+    'Optimizing image…'
 
   const handleResize = useCallback(async (file: File): Promise<File> => {
     return resizeImage(file)
@@ -68,27 +25,77 @@ export const UploadOptimizer: React.FC = () => {
     if (processedFiles.current.has(fileValue)) return
 
     let cancelled = false
+    // Payload's SaveButton short-circuits when uploadStatus === 'uploading',
+    // so Save is blocked until the resize completes. Without this, submit
+    // captures the field snapshot before setFileValue(resized) lands, and
+    // either the original oversized file is sent, or (on Vercel) an empty
+    // body reaches /api/media and returns 400.
+    setUploadStatus?.('uploading')
+    setOptimizing(true)
 
-    handleResize(fileValue).then((resized) => {
-      if (cancelled) return
-      processedFiles.current.add(resized)
-      if (resized !== fileValue) {
-        setFileValue(resized)
-      }
-    })
+    handleResize(fileValue)
+      .then((resized) => {
+        if (cancelled) return
+        processedFiles.current.add(resized)
+        if (resized !== fileValue) {
+          setFileValue(resized)
+        }
+      })
+      .catch(() => {
+        // Defensive — resizeImage already catches its own errors and falls
+        // back to the original, but treat an unexpected throw as "let the
+        // original through" rather than leaving Save blocked forever.
+      })
+      .finally(() => {
+        if (cancelled) return
+        setOptimizing(false)
+        setUploadStatus?.('idle')
+      })
 
     return () => {
       cancelled = true
+      // Ensure Save is re-enabled if the component unmounts mid-resize.
+      setUploadStatus?.('idle')
     }
-  }, [fileValue, handleResize, setFileValue])
+  }, [fileValue, handleResize, setFileValue, setUploadStatus])
 
   if (!collectionSlug || !uploadConfig) return null
 
   return (
-    <Upload
-      collectionSlug={collectionSlug}
-      initialState={initialState}
-      uploadConfig={uploadConfig}
-    />
+    <>
+      <Upload
+        collectionSlug={collectionSlug}
+        initialState={initialState}
+        uploadConfig={uploadConfig}
+      />
+      {optimizing && (
+        <div
+          style={{
+            fontSize: 12,
+            color: '#6b7280',
+            marginTop: 6,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              width: 10,
+              height: 10,
+              border: '2px solid #d1d5db',
+              borderTopColor: '#4f46e5',
+              borderRadius: '50%',
+              animation: 'imageOptimizerSpin 0.8s linear infinite',
+            }}
+          />
+          {optimizingLabel}
+          <style>{`@keyframes imageOptimizerSpin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+    </>
   )
 }

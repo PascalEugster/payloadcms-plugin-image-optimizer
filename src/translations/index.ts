@@ -17,6 +17,7 @@ export const translations = {
       optimizedCount: '{{complete}}/{{total}} optimized',
       failed: '{{count}} failed.',
       allImagesOptimized: 'All {{count}} images optimized',
+      optimizing: 'Optimizing image…',
     },
   },
   de: {
@@ -37,6 +38,7 @@ export const translations = {
       optimizedCount: '{{complete}}/{{total}} optimiert',
       failed: '{{count}} fehlgeschlagen.',
       allImagesOptimized: 'Alle {{count}} Bilder optimiert',
+      optimizing: 'Bild wird optimiert…',
     },
   },
   fr: {
@@ -57,6 +59,7 @@ export const translations = {
       optimizedCount: '{{complete}}/{{total}} optimisé(s)',
       failed: '{{count}} échoué(s).',
       allImagesOptimized: 'Les {{count}} images sont optimisées',
+      optimizing: "Optimisation de l'image…",
     },
   },
 } as Record<string, Record<string, Record<string, string>>>
