@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.1 — Docs: `clientUploads` incompatibility with `generateFilename`
+
+Documentation-only patch. No code changes.
+
+### Docs
+
+- **README + AGENT_DOCS**: clarified that `@payloadcms/storage-vercel-blob`'s `clientUploads: true` is **incompatible** with this plugin's `generateFilename` (including `seoFilename` and `uuidFilename`).
+
+  **Why**: verified against upstream source — when `clientUploads: true`, the browser PUTs directly to Blob using a signed URL whose pathname is locked at sign time (`getClientUploadRoute.ts`'s `onBeforeGenerateToken` can only decide `addRandomSuffix`, not the pathname). On the follow-up metadata POST, `plugin-cloud-storage`'s `afterChange` hook filters files with `clientUploadContext` set before calling `adapter.handleUpload`, so any server-side rename just desyncs `data.filename` from the actual blob pathname → 404s. Same mechanism means server-side `upload.formatOptions` / `upload.resizeOptions` on the parent are computed then discarded — the blob retains the browser's original bytes. Per-size `imageSizes` still work (separate code path).
+
+- **New compatibility matrix** in both docs showing which plugin features work under each `clientUploads` mode.
+- **Corrected guidance**: with `clientUploads: true`, use `addRandomSuffix: true` on the storage adapter — that's the only filename-uniqueness approach that survives client uploads. `generateFilename` (including `seoFilename`) requires the Payload default `clientUploads: false`.
+- **Repositioned client-side pre-resize** as the primary workaround for Vercel's 4.5MB serverless body limit, since `clientOptimization` (on by default) keeps most photos under the limit without requiring `clientUploads: true` and its trade-offs.
+
 ## 2.1.0 — Honest positioning + `uniqueFileNames` removed
 
 A documentation and API-cleanup release following an audit of what this plugin actually adds on top of Payload core. No behavior changes for images; no hook rewrites.
