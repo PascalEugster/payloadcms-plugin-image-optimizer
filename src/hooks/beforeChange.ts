@@ -3,9 +3,25 @@ import type { CollectionBeforeChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { resolveCollectionConfig } from '../defaults.js'
-import { generateThumbHash, optimizeImage } from '../processing/index.js'
-import { isCloudStorage } from '../utilities/storage.js'
+import { generateThumbHash } from '../processing/index.js'
 
+/**
+ * v2 — Config-injection architecture.
+ *
+ * Payload's native `generateFileData()` pipeline (driven by
+ * `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and
+ * per-size `imageSize.formatOptions` injected at plugin init) handles all the
+ * actual image work — resize, format conversion, EXIF strip — before this hook
+ * runs. By this point `req.file.data` is the optimized buffer Payload will
+ * persist to disk / cloud storage.
+ *
+ * This hook only owns:
+ *   • the optional filename strategy (seoFilename, uuidFilename, custom)
+ *   • the early-bail when Payload is re-fetching its own file for a focal-point
+ *     adjustment (no need to re-stamp anything)
+ *   • the imageOptimizer status field (originalSize, optimizedSize, status,
+ *     thumbHash) and decision of whether an additive multi-format job is needed
+ */
 export const createBeforeChangeHook = (
   resolvedConfig: ResolvedImageOptimizerConfig,
   collectionSlug: string,
@@ -21,7 +37,11 @@ export const createBeforeChangeHook = (
     // (via getFileByPath or getExternalFile). For genuine user uploads, req.file.name
     // comes from the user's filesystem and will differ from the stored filename.
     // Skip redundant optimization; let Payload's native image-size regeneration handle cropping.
-    if (originalDoc) {
+    //
+    // The regeneration task also matches this pattern (re-uploads the existing
+    // file under its current name) but it explicitly opts in to a full re-stamp
+    // via `imageOptimizer_regenerating`, so we don't short-circuit there.
+    if (originalDoc && !context?.imageOptimizer_regenerating) {
       const existingFilename = (originalDoc as Record<string, unknown>).filename as string | undefined
 
       if (existingFilename && req.file.name === existingFilename) {
@@ -35,11 +55,17 @@ export const createBeforeChangeHook = (
     }
 
     // Apply custom filename strategy (seoFilename, uuidFilename, or user-provided).
-    // The callback returns a stem (no extension) — we append the original extension here,
-    // and replaceOriginal may swap it to the target format extension later.
+    // The callback returns a stem (no extension) — we append the extension Payload
+    // will give the file (the post-formatOptions extension is reflected in
+    // data.filename by the time the field hooks run, but at this point we still
+    // see the original upload extension on req.file.name; data.filename has the
+    // post-pipeline extension when generateFileData has produced one).
     if (resolvedConfig.generateFilename) {
       const existingFilename = (originalDoc as Record<string, unknown> | undefined)?.filename as string | undefined
-      const ext = path.extname(req.file.name)
+      // Prefer data.filename (set by generateFileData with the converted extension)
+      // over req.file.name (the original upload extension). Falls back to req.file.name.
+      const sourceForExt = (data as Record<string, unknown>).filename as string | undefined ?? req.file.name
+      const ext = path.extname(sourceForExt)
       const stem = resolvedConfig.generateFilename({
         altText: (data as Record<string, unknown>).alt as string | undefined,
         originalFilename: req.file.name,
@@ -52,76 +78,43 @@ export const createBeforeChangeHook = (
       data.filename = newFilename
     }
 
-    const originalSize = req.file.data.length
-
     const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug)
 
-    // Single-pipeline optimization: resize + strip metadata + optional format conversion.
-    // Skips .rotate() — Payload's generateFileData() already auto-rotated before hooks run.
-    const primaryFormat = perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0
-      ? perCollectionConfig.formats[0]
-      : undefined
+    // Original size: captured by beforeOperation hook before generateFileData
+    // mutated req.file.size. Falls back to current req.file.size when unavailable
+    // (e.g. tests that bypass beforeOperation), in which case originalSize ==
+    // optimizedSize.
+    const originalSize =
+      (context?.imageOptimizer_originalSize as number | undefined) ?? req.file.data.length
 
-    const processed = await optimizeImage(req.file.data, {
-      maxDimensions: perCollectionConfig.maxDimensions,
-      stripMetadata: resolvedConfig.stripMetadata,
-      format: primaryFormat,
-    })
+    // Optimized size: req.file.data here is the post-resize/format buffer that
+    // Payload will write. data.filesize was also populated by generateFileData
+    // and is the same value, but req.file.data.length is the source of truth.
+    const optimizedSize = req.file.data.length
 
-    let finalBuffer = processed.buffer
-    let finalSize = processed.size
-
-    if (primaryFormat && processed.mimeType) {
-      // Update filename and mimeType so Payload stores the correct metadata
-      const originalFilename = data.filename || req.file.name || ''
-      const newFilename = `${path.parse(originalFilename).name}.${primaryFormat.format}`
-      context.imageOptimizer_originalFilename = originalFilename
-      data.filename = newFilename
-      data.mimeType = processed.mimeType
-      data.filesize = finalSize
-    }
-
-    // Determine if async work (variant generation job) is needed after create.
-    // If not, set status to 'complete' now so afterChange doesn't need a separate
-    // update() call — which fails with 404 on MongoDB due to transaction isolation
-    // when cloud storage adapters are involved.
-    const collectionConfig = req.payload.collections[collectionSlug as keyof typeof req.payload.collections].config
-    const cloudStorage = isCloudStorage(collectionConfig)
-    const needsAsyncJob = !cloudStorage && perCollectionConfig.formats.length > 0 && !(perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length <= 1)
+    // Multi-format mode requires the additive convertFormats job to handle
+    // formats[1..N] (formats[0] is already produced natively).
+    const needsAsyncJob = perCollectionConfig.formats.length > 1
 
     data.imageOptimizer = {
       originalSize,
-      optimizedSize: finalSize,
+      optimizedSize,
       status: needsAsyncJob ? 'pending' : 'complete',
       variants: needsAsyncJob ? undefined : [],
       error: null,
     }
 
+    // Single-format mode: compute ThumbHash inline so it lands in the initial
+    // DB write (avoids a follow-up update that fails on MongoDB transactions
+    // when cloud storage is involved).
+    if (resolvedConfig.generateThumbHash && !needsAsyncJob) {
+      data.imageOptimizer.thumbHash = await generateThumbHash(req.file.data)
+    }
+
+    context.imageOptimizer_hasUpload = true
     if (!needsAsyncJob) {
       context.imageOptimizer_statusResolved = true
     }
-
-    // When no async job will run, compute ThumbHash now so it's included in the
-    // initial DB write. This avoids a separate update() call that would fail with
-    // 404 on MongoDB due to transaction isolation. When a job WILL run, the
-    // convertFormats task computes ThumbHash in the background instead.
-    if (resolvedConfig.generateThumbHash && !needsAsyncJob) {
-      data.imageOptimizer.thumbHash = await generateThumbHash(finalBuffer)
-    }
-
-    // Write processed buffer back to req.file so cloud storage adapters
-    // (which read req.file in their afterChange hook) upload the optimized version.
-    // Payload's own uploadFiles step does NOT re-read req.file.data for its local
-    // disk write, so we also store the buffer in context for our afterChange hook
-    // to overwrite the local file when local storage is enabled.
-    req.file.data = finalBuffer
-    req.file.size = finalSize
-    if (perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0) {
-      req.file.name = data.filename
-      req.file.mimetype = data.mimeType
-    }
-    context.imageOptimizer_processedBuffer = finalBuffer
-    context.imageOptimizer_hasUpload = true
 
     return data
   }

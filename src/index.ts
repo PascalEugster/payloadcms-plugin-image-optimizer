@@ -2,10 +2,11 @@ import type { Config } from 'payload'
 import { deepMergeSimple } from 'payload/shared'
 
 import type { ImageOptimizerConfig } from './types.js'
-import { resolveConfig } from './defaults.js'
+import { resolveCollectionConfig, resolveConfig } from './defaults.js'
 import { translations } from './translations/index.js'
 import { getImageOptimizerField } from './fields/imageOptimizerField.js'
 import { createBeforeChangeHook } from './hooks/beforeChange.js'
+import { createBeforeOperationHook } from './hooks/beforeOperation.js'
 import { createAfterChangeHook } from './hooks/afterChange.js'
 import { createConvertFormatsHandler } from './tasks/convertFormats.js'
 import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js'
@@ -44,11 +45,85 @@ export const imageOptimizer =
         return { ...collection, fields }
       }
 
+      // ──────────────────────────────────────────────────────────────────────────
+      // v2 — Config-injection: hand off resize / format conversion / metadata
+      // strip to Payload's native generateFileData() pipeline. The plugin only
+      // owns ThumbHash, status tracking, optional filename strategy, and
+      // additive multi-format variants (e.g. AVIF alongside the WebP primary).
+      //
+      // Non-override rule: if the user already set any of these on their
+      // collection, we leave their value intact.
+      // ──────────────────────────────────────────────────────────────────────────
+      // Only inject upload-pipeline config when the collection actually has an
+      // upload. Targeting a non-upload collection is treated as a misconfig
+      // for everything except field/hook injection.
+      const hasUploadConfig = collection.upload != null && collection.upload !== false
+      const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collection.slug)
+      const userUpload =
+        typeof collection.upload === 'object' && collection.upload !== null
+          ? collection.upload
+          : ({} as Record<string, unknown>)
+
+      const primaryFormat = perCollectionConfig.formats[0]
+
+      const injectedUpload: Record<string, unknown> = { ...userUpload }
+
+      // Parent format conversion — only when replaceOriginal AND a format is configured
+      if (
+        perCollectionConfig.replaceOriginal &&
+        primaryFormat &&
+        userUpload.formatOptions === undefined
+      ) {
+        injectedUpload.formatOptions = {
+          format: primaryFormat.format,
+          options: { quality: primaryFormat.quality },
+        }
+      }
+
+      // Resize parent
+      if (userUpload.resizeOptions === undefined) {
+        injectedUpload.resizeOptions = {
+          width: perCollectionConfig.maxDimensions.width,
+          height: perCollectionConfig.maxDimensions.height,
+          fit: 'inside',
+          withoutEnlargement: true,
+        }
+      }
+
+      // Strip metadata (Payload default keeps metadata; false strips it)
+      if (resolvedConfig.stripMetadata && userUpload.withMetadata === undefined) {
+        injectedUpload.withMetadata = false
+      }
+
+      // Per-size format conversion — inject formatOptions on each imageSize that
+      // doesn't already have one. Payload's createImageSizes derives the size
+      // filename extension from the produced buffer's MIME type, so injecting
+      // formatOptions causes sizes to land as `.webp` automatically.
+      if (primaryFormat && Array.isArray(userUpload.imageSizes)) {
+        injectedUpload.imageSizes = (userUpload.imageSizes as Array<Record<string, unknown>>).map(
+          (size) => {
+            if (size.formatOptions !== undefined) return size
+            return {
+              ...size,
+              formatOptions: {
+                format: primaryFormat.format,
+                options: { quality: primaryFormat.quality },
+              },
+            }
+          },
+        )
+      }
+
       return {
         ...collection,
         fields,
+        ...(hasUploadConfig ? { upload: injectedUpload } : {}),
         hooks: {
           ...collection.hooks,
+          beforeOperation: [
+            ...(collection.hooks?.beforeOperation || []),
+            createBeforeOperationHook(),
+          ],
           beforeChange: [
             ...(collection.hooks?.beforeChange || []),
             createBeforeChangeHook(resolvedConfig, collection.slug),

@@ -1,32 +1,11 @@
 import sharp from 'sharp'
 import { rgbaToThumbHash } from 'thumbhash'
 
-export async function stripAndResize(
-  buffer: Buffer,
-  maxDimensions: { width: number; height: number },
-  stripMetadata: boolean,
-): Promise<{ buffer: Buffer; width: number; height: number; size: number }> {
-  let pipeline = sharp(buffer)
-    .rotate()
-    .resize(maxDimensions.width, maxDimensions.height, {
-      fit: 'inside',
-      withoutEnlargement: true,
-    })
-
-  if (!stripMetadata) {
-    pipeline = pipeline.keepMetadata()
-  }
-
-  const { data, info } = await pipeline.toBuffer({ resolveWithObject: true })
-
-  return {
-    buffer: data,
-    width: info.width,
-    height: info.height,
-    size: info.size,
-  }
-}
-
+/**
+ * Generates a base64-encoded ThumbHash from any image buffer.
+ * Used by the beforeChange hook (single-format mode) and convertFormats task
+ * (multi-format mode) to produce blur placeholders.
+ */
 export async function generateThumbHash(buffer: Buffer): Promise<string> {
   const { data, info } = await sharp(buffer)
     .resize(100, 100, { fit: 'inside' })
@@ -39,44 +18,10 @@ export async function generateThumbHash(buffer: Buffer): Promise<string> {
 }
 
 /**
- * Single-pipeline image optimization: resize + metadata strip + optional format conversion.
- * Skips .rotate() because Payload's generateFileData() already auto-rotates before hooks run.
+ * Converts an image buffer to a target format. Used by the additive
+ * convertFormats task to produce variants beyond the primary format that
+ * Payload already produced natively (e.g. AVIF alongside the WebP primary).
  */
-export async function optimizeImage(
-  buffer: Buffer,
-  options: {
-    maxDimensions: { width: number; height: number }
-    stripMetadata: boolean
-    format?: { format: 'webp' | 'avif'; quality: number }
-  },
-): Promise<{ buffer: Buffer; width: number; height: number; size: number; mimeType?: string }> {
-  let pipeline = sharp(buffer)
-    .resize(options.maxDimensions.width, options.maxDimensions.height, {
-      fit: 'inside',
-      withoutEnlargement: true,
-    })
-
-  if (!options.stripMetadata) {
-    pipeline = pipeline.keepMetadata()
-  }
-
-  if (options.format) {
-    pipeline = pipeline.toFormat(options.format.format, { quality: options.format.quality })
-  }
-
-  const { data, info } = await pipeline.toBuffer({ resolveWithObject: true })
-
-  return {
-    buffer: data,
-    width: info.width,
-    height: info.height,
-    size: info.size,
-    ...(options.format && {
-      mimeType: options.format.format === 'webp' ? 'image/webp' : 'image/avif',
-    }),
-  }
-}
-
 export async function convertFormat(
   buffer: Buffer,
   format: 'webp' | 'avif',
