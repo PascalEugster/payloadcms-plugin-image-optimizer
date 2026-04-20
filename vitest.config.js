@@ -30,6 +30,7 @@ export default defineConfig(() => {
         'dev/clientResize.unit.spec.ts',
         'dev/filenameStrategies.unit.spec.ts',
         'dev/logger.unit.spec.ts',
+        'dev/regenerateUseTransactions.unit.spec.ts',
       ],
     },
   }

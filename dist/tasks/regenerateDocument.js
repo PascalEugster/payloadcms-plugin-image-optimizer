@@ -140,6 +140,14 @@ async function isCancelled(req, collectionSlug) {
             // thumbHash, status='complete').
             //
             // For cloud storage the same call re-uploads via the adapter's hook.
+            //
+            // `disableTransaction` defaults ON for this operation (controlled via
+            // `regenerateUseTransactions`) because the sharp + 3-upload pipeline
+            // on large originals routinely exceeds MongoDB's default
+            // `transactionLifetimeLimitSeconds` of 60s. Running non-transactionally
+            // sidesteps that ceiling without requiring an Atlas plan upgrade; the
+            // atomicity loss is acceptable because per-doc regens are independent
+            // and idempotent.
             await req.payload.update({
                 id: input.docId,
                 collection: input.collectionSlug,
@@ -153,6 +161,7 @@ async function isCancelled(req, collectionSlug) {
                     }
                 } : {},
                 depth: 0,
+                disableTransaction: !resolvedConfig.regenerateUseTransactions,
                 file: {
                     name: safeFilename,
                     data: fileBuffer,
@@ -206,6 +215,12 @@ async function isCancelled(req, collectionSlug) {
             });
             const errorMessage = err instanceof Error ? err.message : String(err);
             try {
+                // Force the error writeback non-transactional regardless of the
+                // `regenerateUseTransactions` setting. If the primary update aborted
+                // at the Mongo transaction layer, the request's transaction is already
+                // poisoned — reusing it here would cascade into a double-failure and
+                // lose the error status on the doc. A fresh non-transactional write
+                // always persists.
                 await req.payload.update({
                     id: input.docId,
                     collection: input.collectionSlug,
@@ -218,7 +233,8 @@ async function isCancelled(req, collectionSlug) {
                             status: 'error'
                         }
                     },
-                    depth: 0
+                    depth: 0,
+                    disableTransaction: true
                 });
             } catch (updateErr) {
                 // Suppress the double-log when the error-writeback also hits a

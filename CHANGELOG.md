@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.4.0 — Bypass MongoDB transactions on regen, bump maxDuration to 300s
+
+Field reports surfaced that the regeneration task was hanging on large originals with "Transaction with { txnNumber: N } has been aborted." The root cause: MongoDB's default `transactionLifetimeLimitSeconds` is **60 seconds**, and the `payload.update({ file })` call in the task does the whole sharp + 3-upload pipeline inside one transaction. On a 10MB+ DSLR source with cloud storage, the pipeline routinely exceeds 60s. MongoDB then aborts the transaction, the primary throw cascades, and our catch-block writeback — still running against the same poisoned transaction — also fails. Result: a hung regen with no recorded error status, visible only as "task ran, never completed" in the job logs.
+
+The fix requires neither an Atlas plan upgrade nor a cluster config change.
+
+### Added
+
+- **`regenerateUseTransactions` config option** (`boolean`, default `false`). Controls whether the regeneration task's primary `payload.update({ file })` wraps in a MongoDB transaction. Default is now OFF — the pipeline runs non-transactionally via Payload's first-class `disableTransaction: true` option (same primitive Payload core uses for its own job-queue writes). The 60s transaction ceiling stops applying.
+- **Task-boundary error writeback is now *always* non-transactional**, regardless of `regenerateUseTransactions`. Ensures `imageOptimizer.status = 'error'` is reliably persisted on failure — previously, a primary-transaction abort would cascade and swallow the error status.
+
+### Changed
+
+- **Default `maxDuration` export bumped from 60 → 300.** Matches Vercel's current platform default (was 60/90 on older plans). Consumers who re-export `maxDuration` from `@inoo-ch/payload-image-optimizer` get an additional 240s of function runtime headroom for large regens; consumers who want a tighter ceiling can still set their own `export const maxDuration = <n>` on the route file, which takes precedence.
+
+### Tradeoffs
+
+- Atomicity loss on regen is now the norm. A partial failure (e.g. 2 of 3 blob uploads succeed before an error) can leave a doc in a mixed state. This is acceptable because (a) each regen is a single-doc operation with no cross-doc invariants, (b) the error status + task-boundary log identify affected docs, and (c) re-running regen is idempotent and recovers the state. Set `regenerateUseTransactions: true` if your app relies on atomic regens and you've bumped your cluster's transaction lifetime.
+
+### Internal
+
+- `resolveConfig()` in `src/defaults.ts` now emits `regenerateUseTransactions: boolean` on `ResolvedImageOptimizerConfig`.
+- `src/tasks/regenerateDocument.ts` passes `disableTransaction: !resolvedConfig.regenerateUseTransactions` on the main update and a hard-coded `disableTransaction: true` on the error writeback.
+- Tests: 119/119 passing (3 new unit tests for the resolver default + override behavior).
+
+---
+
 ## 3.3.0 — Configurable structured logging for the regeneration task
 
 `imageOptimizer_regenerateDocument` runs silently by default today. When it throws, the message lands in `imageOptimizer.error` on the document but the task-boundary error — with our collection/doc/duration context — never gets emitted by us. Downstream consumers have been working around this by wrapping the task handler in their own `onInit`. This release retires that workaround.

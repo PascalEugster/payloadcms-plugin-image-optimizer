@@ -1,20 +1,26 @@
 import { deepMergeSimple } from 'payload/shared';
 import { resolveCollectionConfig, resolveConfig } from './defaults.js';
-import { translations } from './translations/index.js';
+import { createCancelHandler, createRegenerateHandler, createRegenerateStatusHandler } from './endpoints/regenerate.js';
 import { getImageOptimizerField } from './fields/imageOptimizerField.js';
 import { createBeforeChangeHook } from './hooks/beforeChange.js';
 import { createBeforeOperationHook } from './hooks/beforeOperation.js';
 import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js';
-import { createRegenerateHandler, createRegenerateStatusHandler, createCancelHandler } from './endpoints/regenerate.js';
+import { translations } from './translations/index.js';
 export { defaultImageOptimizerFields } from './fields/imageOptimizerField.js';
-export { encodeImageToThumbHash, decodeThumbHashToDataURL } from './utilities/thumbhash.js';
-export { uuidFilename, seoFilename, timestampFilename } from './utilities/filenameStrategies.js';
+export { seoFilename, timestampFilename, uuidFilename } from './utilities/filenameStrategies.js';
+export { decodeThumbHashToDataURL, encodeImageToThumbHash } from './utilities/thumbhash.js';
 /**
  * Recommended maxDuration for the Payload API route on Vercel.
  * Re-export this in your route file:
  *
  *   export { maxDuration } from '@inoo-ch/payload-image-optimizer'
- */ export const maxDuration = 60;
+ *
+ * Set to 300 to match Vercel's current platform default (up from 60/90 in
+ * earlier plans). Large-file regenerations routinely need more than 60s
+ * between source download, sharp processing, and cloud-storage re-upload.
+ * Consumers who want a tighter ceiling can set their own `export const
+ * maxDuration = <n>` on the route file, which takes precedence.
+ */ export const maxDuration = 300;
 export const imageOptimizer = (pluginOptions)=>(config)=>{
         const resolvedConfig = resolveConfig(pluginOptions);
         const targetSlugs = Object.keys(resolvedConfig.collections);
@@ -66,9 +72,9 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
             // Resize parent
             if (userUpload.resizeOptions === undefined) {
                 injectedUpload.resizeOptions = {
-                    width: perCollectionConfig.maxDimensions.width,
-                    height: perCollectionConfig.maxDimensions.height,
                     fit: 'inside',
+                    height: perCollectionConfig.maxDimensions.height,
+                    width: perCollectionConfig.maxDimensions.width,
                     withoutEnlargement: true
                 };
             }
@@ -102,8 +108,12 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                         if (sizes) {
                             let smallest = null;
                             for (const v of Object.values(sizes)){
-                                if (!v) continue;
-                                if (typeof v.url !== 'string' || typeof v.width !== 'number') continue;
+                                if (!v) {
+                                    continue;
+                                }
+                                if (typeof v.url !== 'string' || typeof v.width !== 'number') {
+                                    continue;
+                                }
                                 if (!smallest || v.width < smallest.width) {
                                     smallest = {
                                         url: v.url,
@@ -111,9 +121,13 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                                     };
                                 }
                             }
-                            if (smallest) return smallest.url;
+                            if (smallest) {
+                                return smallest.url;
+                            }
                         }
-                        if (!filename) return null;
+                        if (!filename) {
+                            return null;
+                        }
                         return `/api/${slug}/file/${filename}`;
                     };
                 } else if (typeof opt === 'string' || typeof opt === 'function') {
@@ -166,7 +180,9 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
             // by default. Revisit if/when Payload exposes `data` to `generateImageName`.
             if (targetFormat && Array.isArray(userUpload.imageSizes)) {
                 injectedUpload.imageSizes = userUpload.imageSizes.map((size)=>{
-                    if (size.formatOptions !== undefined) return size;
+                    if (size.formatOptions !== undefined) {
+                        return size;
+                    }
                     return {
                         ...size,
                         formatOptions: {
@@ -184,17 +200,6 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                 ...hasUploadConfig ? {
                     upload: injectedUpload
                 } : {},
-                hooks: {
-                    ...collection.hooks,
-                    beforeOperation: [
-                        ...collection.hooks?.beforeOperation || [],
-                        createBeforeOperationHook()
-                    ],
-                    beforeChange: [
-                        ...collection.hooks?.beforeChange || [],
-                        createBeforeChangeHook(resolvedConfig, collection.slug)
-                    ]
-                },
                 admin: {
                     ...collection.admin,
                     components: {
@@ -212,6 +217,17 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                             ]
                         } : {}
                     }
+                },
+                hooks: {
+                    ...collection.hooks,
+                    beforeChange: [
+                        ...collection.hooks?.beforeChange || [],
+                        createBeforeChangeHook(resolvedConfig, collection.slug)
+                    ],
+                    beforeOperation: [
+                        ...collection.hooks?.beforeOperation || [],
+                        createBeforeOperationHook()
+                    ]
                 }
             };
         });
@@ -230,16 +246,34 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
         return {
             ...config,
             collections,
+            endpoints: [
+                ...config.endpoints ?? [],
+                {
+                    handler: createRegenerateHandler(resolvedConfig),
+                    method: 'post',
+                    path: '/image-optimizer/regenerate'
+                },
+                {
+                    handler: createRegenerateStatusHandler(resolvedConfig),
+                    method: 'get',
+                    path: '/image-optimizer/regenerate'
+                },
+                {
+                    handler: createCancelHandler(resolvedConfig),
+                    method: 'delete',
+                    path: '/image-optimizer/regenerate'
+                }
+            ],
             globals: [
                 ...config.globals || [],
                 {
                     slug: 'image-optimizer-state',
-                    admin: {
-                        hidden: true
-                    },
                     access: {
                         read: ()=>true,
                         update: ()=>true
+                    },
+                    admin: {
+                        hidden: true
                     },
                     fields: [
                         {
@@ -256,6 +290,7 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                     ...config.jobs?.tasks || [],
                     {
                         slug: 'imageOptimizer_regenerateDocument',
+                        handler: createRegenerateDocumentHandler(resolvedConfig),
                         inputSchema: [
                             {
                                 name: 'collectionSlug',
@@ -278,29 +313,10 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                                 type: 'text'
                             }
                         ],
-                        retries: 2,
-                        handler: createRegenerateDocumentHandler(resolvedConfig)
+                        retries: 2
                     }
                 ]
-            },
-            endpoints: [
-                ...config.endpoints ?? [],
-                {
-                    path: '/image-optimizer/regenerate',
-                    method: 'post',
-                    handler: createRegenerateHandler(resolvedConfig)
-                },
-                {
-                    path: '/image-optimizer/regenerate',
-                    method: 'get',
-                    handler: createRegenerateStatusHandler(resolvedConfig)
-                },
-                {
-                    path: '/image-optimizer/regenerate',
-                    method: 'delete',
-                    handler: createCancelHandler(resolvedConfig)
-                }
-            ]
+            }
         };
     };
 

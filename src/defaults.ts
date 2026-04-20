@@ -94,6 +94,7 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   maxDimensions: config.maxDimensions ?? { height: 2560, width: 2560 },
   metadataPolicy: config.metadataPolicy,
   regenerateButton: resolveRegenerateButton(config.regenerateButton),
+  regenerateUseTransactions: config.regenerateUseTransactions ?? false,
   responseHeaders: config.responseHeaders ?? false,
   stripMetadata: config.stripMetadata ?? true,
 })

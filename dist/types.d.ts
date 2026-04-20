@@ -221,6 +221,23 @@ export type ImageOptimizerConfig = {
      *   `allowForceAll: true` exposes the "Force re-process all" opt-in (default: `false`).
      */
     regenerateButton?: boolean | RegenerateButtonConfig;
+    /** Wrap the regeneration task's `payload.update({ file })` in a MongoDB
+     * transaction. Defaults to `false`.
+     *
+     * The update runs the full sharp + cloud-storage upload pipeline, which on
+     * large originals can easily exceed MongoDB's default
+     * `transactionLifetimeLimitSeconds` of 60s — aborting the transaction and
+     * cascading into the error-writeback step. Disabling transactions on this
+     * specific operation sidesteps that ceiling entirely.
+     *
+     * Per-doc regens are independent and idempotent, so the atomicity loss is
+     * acceptable: a partial failure leaves the doc in a recoverable state
+     * (`imageOptimizer.status = 'error'` on the doc, plus the task-boundary
+     * error log). Re-running the regen on that doc resolves it.
+     *
+     * Set to `true` only if you've already bumped your cluster's transaction
+     * lifetime and prefer atomicity over throughput on regeneration. */
+    regenerateUseTransactions?: boolean;
     /** Opt-in response header policy for file responses on targeted collections.
      *
      * - `false` (default) — do nothing.
@@ -255,6 +272,8 @@ export type ResolvedImageOptimizerConfig = {
     /** Resolved metadata-keep policy. When set, takes precedence over `stripMetadata`. */
     metadataPolicy?: MetadataPolicy;
     regenerateButton: ResolvedRegenerateButtonConfig;
+    /** Resolved regeneration transaction mode. Defaults to `false`. */
+    regenerateUseTransactions: boolean;
     /** Resolved response-header policy. Defaults to `false`. */
     responseHeaders: ResponseHeadersOption;
 } & Required<Pick<ImageOptimizerConfig, 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>>;

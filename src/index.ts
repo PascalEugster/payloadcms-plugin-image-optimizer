@@ -1,28 +1,36 @@
 import type { Config } from 'payload'
+
 import { deepMergeSimple } from 'payload/shared'
 
 import type { ImageOptimizerConfig } from './types.js'
+
 import { resolveCollectionConfig, resolveConfig } from './defaults.js'
-import { translations } from './translations/index.js'
+import { createCancelHandler, createRegenerateHandler, createRegenerateStatusHandler } from './endpoints/regenerate.js'
 import { getImageOptimizerField } from './fields/imageOptimizerField.js'
 import { createBeforeChangeHook } from './hooks/beforeChange.js'
 import { createBeforeOperationHook } from './hooks/beforeOperation.js'
 import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js'
-import { createRegenerateHandler, createRegenerateStatusHandler, createCancelHandler } from './endpoints/regenerate.js'
+import { translations } from './translations/index.js'
 
-export type { ImageOptimizerConfig, ImageFormat, FormatQuality, CollectionOptimizerConfig, ImageOptimizerData, MediaResource, MediaSizeVariant, FieldsOverride, GenerateFilename, GenerateFilenameArgs } from './types.js'
 export { defaultImageOptimizerFields } from './fields/imageOptimizerField.js'
+export type { CollectionOptimizerConfig, FieldsOverride, FormatQuality, GenerateFilename, GenerateFilenameArgs, ImageFormat, ImageOptimizerConfig, ImageOptimizerData, MediaResource, MediaSizeVariant } from './types.js'
 
-export { encodeImageToThumbHash, decodeThumbHashToDataURL } from './utilities/thumbhash.js'
-export { uuidFilename, seoFilename, timestampFilename } from './utilities/filenameStrategies.js'
+export { seoFilename, timestampFilename, uuidFilename } from './utilities/filenameStrategies.js'
+export { decodeThumbHashToDataURL, encodeImageToThumbHash } from './utilities/thumbhash.js'
 
 /**
  * Recommended maxDuration for the Payload API route on Vercel.
  * Re-export this in your route file:
  *
  *   export { maxDuration } from '@inoo-ch/payload-image-optimizer'
+ *
+ * Set to 300 to match Vercel's current platform default (up from 60/90 in
+ * earlier plans). Large-file regenerations routinely need more than 60s
+ * between source download, sharp processing, and cloud-storage re-upload.
+ * Consumers who want a tighter ceiling can set their own `export const
+ * maxDuration = <n>` on the route file, which takes precedence.
  */
-export const maxDuration = 60
+export const maxDuration = 300
 
 export const imageOptimizer =
   (pluginOptions: ImageOptimizerConfig) =>
@@ -78,9 +86,9 @@ export const imageOptimizer =
       // Resize parent
       if (userUpload.resizeOptions === undefined) {
         injectedUpload.resizeOptions = {
-          width: perCollectionConfig.maxDimensions.width,
-          height: perCollectionConfig.maxDimensions.height,
           fit: 'inside',
+          height: perCollectionConfig.maxDimensions.height,
+          width: perCollectionConfig.maxDimensions.width,
           withoutEnlargement: true,
         }
       }
@@ -111,27 +119,27 @@ export const imageOptimizer =
         if (opt === 'auto') {
           const slug = collection.slug
           injectedUpload.adminThumbnail = ({ doc }: { doc: Record<string, unknown> }) => {
-            const filename = (doc as { filename?: string | null }).filename
+            const filename = (doc as { filename?: null | string }).filename
             const sizes = (
               doc as {
                 sizes?: Record<
                   string,
-                  { url?: string | null; width?: number | null } | null | undefined
+                  { url?: null | string; width?: null | number } | null | undefined
                 >
               }
             ).sizes
             if (sizes) {
               let smallest: { url: string; width: number } | null = null
               for (const v of Object.values(sizes)) {
-                if (!v) continue
-                if (typeof v.url !== 'string' || typeof v.width !== 'number') continue
+                if (!v) {continue}
+                if (typeof v.url !== 'string' || typeof v.width !== 'number') {continue}
                 if (!smallest || v.width < smallest.width) {
                   smallest = { url: v.url, width: v.width }
                 }
               }
-              if (smallest) return smallest.url
+              if (smallest) {return smallest.url}
             }
-            if (!filename) return null
+            if (!filename) {return null}
             return `/api/${slug}/file/${filename}`
           }
         } else if (typeof opt === 'string' || typeof opt === 'function') {
@@ -192,7 +200,7 @@ export const imageOptimizer =
       if (targetFormat && Array.isArray(userUpload.imageSizes)) {
         injectedUpload.imageSizes = (userUpload.imageSizes as Array<Record<string, unknown>>).map(
           (size) => {
-            if (size.formatOptions !== undefined) return size
+            if (size.formatOptions !== undefined) {return size}
             return {
               ...size,
               formatOptions: {
@@ -208,17 +216,6 @@ export const imageOptimizer =
         ...collection,
         fields,
         ...(hasUploadConfig ? { upload: injectedUpload } : {}),
-        hooks: {
-          ...collection.hooks,
-          beforeOperation: [
-            ...(collection.hooks?.beforeOperation || []),
-            createBeforeOperationHook(),
-          ],
-          beforeChange: [
-            ...(collection.hooks?.beforeChange || []),
-            createBeforeChangeHook(resolvedConfig, collection.slug),
-          ],
-        },
         admin: {
           ...collection.admin,
           components: {
@@ -241,6 +238,17 @@ export const imageOptimizer =
             : {}),
           },
         },
+        hooks: {
+          ...collection.hooks,
+          beforeChange: [
+            ...(collection.hooks?.beforeChange || []),
+            createBeforeChangeHook(resolvedConfig, collection.slug),
+          ],
+          beforeOperation: [
+            ...(collection.hooks?.beforeOperation || []),
+            createBeforeOperationHook(),
+          ],
+        },
       }
     })
 
@@ -257,12 +265,30 @@ export const imageOptimizer =
     return {
       ...config,
       collections,
+      endpoints: [
+        ...(config.endpoints ?? []),
+        {
+          handler: createRegenerateHandler(resolvedConfig),
+          method: 'post',
+          path: '/image-optimizer/regenerate',
+        },
+        {
+          handler: createRegenerateStatusHandler(resolvedConfig),
+          method: 'get',
+          path: '/image-optimizer/regenerate',
+        },
+        {
+          handler: createCancelHandler(resolvedConfig),
+          method: 'delete',
+          path: '/image-optimizer/regenerate',
+        },
+      ],
       globals: [
         ...(config.globals || []),
         {
           slug: 'image-optimizer-state',
-          admin: { hidden: true },
           access: { read: () => true, update: () => true },
+          admin: { hidden: true },
           fields: [
             { name: 'collections', type: 'json' },
           ],
@@ -275,6 +301,7 @@ export const imageOptimizer =
           ...(config.jobs?.tasks || []),
           {
             slug: 'imageOptimizer_regenerateDocument',
+            handler: createRegenerateDocumentHandler(resolvedConfig),
             inputSchema: [
               { name: 'collectionSlug', type: 'text', required: true },
               { name: 'docId', type: 'text', required: true },
@@ -284,27 +311,8 @@ export const imageOptimizer =
               { name: 'reason', type: 'text' },
             ],
             retries: 2,
-            handler: createRegenerateDocumentHandler(resolvedConfig),
           } as any,
         ],
       },
-      endpoints: [
-        ...(config.endpoints ?? []),
-        {
-          path: '/image-optimizer/regenerate',
-          method: 'post',
-          handler: createRegenerateHandler(resolvedConfig),
-        },
-        {
-          path: '/image-optimizer/regenerate',
-          method: 'get',
-          handler: createRegenerateStatusHandler(resolvedConfig),
-        },
-        {
-          path: '/image-optimizer/regenerate',
-          method: 'delete',
-          handler: createCancelHandler(resolvedConfig),
-        },
-      ],
     }
   }

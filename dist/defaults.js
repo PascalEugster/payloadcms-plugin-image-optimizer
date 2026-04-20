@@ -117,6 +117,7 @@ export const resolveConfig = (config)=>({
         },
         metadataPolicy: config.metadataPolicy,
         regenerateButton: resolveRegenerateButton(config.regenerateButton),
+        regenerateUseTransactions: config.regenerateUseTransactions ?? false,
         responseHeaders: config.responseHeaders ?? false,
         stripMetadata: config.stripMetadata ?? true
     });
