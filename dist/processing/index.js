@@ -1,24 +1,10 @@
 import sharp from 'sharp';
 import { rgbaToThumbHash } from 'thumbhash';
-export async function stripAndResize(buffer, maxDimensions, stripMetadata) {
-    let pipeline = sharp(buffer).rotate().resize(maxDimensions.width, maxDimensions.height, {
-        fit: 'inside',
-        withoutEnlargement: true
-    });
-    if (!stripMetadata) {
-        pipeline = pipeline.keepMetadata();
-    }
-    const { data, info } = await pipeline.toBuffer({
-        resolveWithObject: true
-    });
-    return {
-        buffer: data,
-        width: info.width,
-        height: info.height,
-        size: info.size
-    };
-}
-export async function generateThumbHash(buffer) {
+/**
+ * Generates a base64-encoded ThumbHash from any image buffer.
+ * Used by the beforeChange hook (single-format mode) and convertFormats task
+ * (multi-format mode) to produce blur placeholders.
+ */ export async function generateThumbHash(buffer) {
     const { data, info } = await sharp(buffer).resize(100, 100, {
         fit: 'inside'
     }).raw().ensureAlpha().toBuffer({
@@ -28,35 +14,10 @@ export async function generateThumbHash(buffer) {
     return Buffer.from(thumbHash).toString('base64');
 }
 /**
- * Single-pipeline image optimization: resize + metadata strip + optional format conversion.
- * Skips .rotate() because Payload's generateFileData() already auto-rotates before hooks run.
- */ export async function optimizeImage(buffer, options) {
-    let pipeline = sharp(buffer).resize(options.maxDimensions.width, options.maxDimensions.height, {
-        fit: 'inside',
-        withoutEnlargement: true
-    });
-    if (!options.stripMetadata) {
-        pipeline = pipeline.keepMetadata();
-    }
-    if (options.format) {
-        pipeline = pipeline.toFormat(options.format.format, {
-            quality: options.format.quality
-        });
-    }
-    const { data, info } = await pipeline.toBuffer({
-        resolveWithObject: true
-    });
-    return {
-        buffer: data,
-        width: info.width,
-        height: info.height,
-        size: info.size,
-        ...options.format && {
-            mimeType: options.format.format === 'webp' ? 'image/webp' : 'image/avif'
-        }
-    };
-}
-export async function convertFormat(buffer, format, quality) {
+ * Converts an image buffer to a target format. Used by the additive
+ * convertFormats task to produce variants beyond the primary format that
+ * Payload already produced natively (e.g. AVIF alongside the WebP primary).
+ */ export async function convertFormat(buffer, format, quality) {
     const { data, info } = await sharp(buffer).toFormat(format, {
         quality
     }).toBuffer({

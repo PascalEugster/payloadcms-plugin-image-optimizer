@@ -4,7 +4,17 @@ import { resolveCollectionConfig } from '../defaults.js';
 import { convertFormat, generateThumbHash } from '../processing/index.js';
 import { resolveStaticDir } from '../utilities/resolveStaticDir.js';
 import { fetchFileBuffer, isCloudStorage } from '../utilities/storage.js';
-export const createConvertFormatsHandler = (resolvedConfig)=>{
+/**
+ * v2 — Additive multi-format job.
+ *
+ * Payload's native pipeline already produced the primary format (formats[0])
+ * as the parent file. This task only generates additive variants for
+ * formats[1..N] (e.g. AVIF alongside the WebP primary) and updates the doc's
+ * `imageOptimizer.variants` array.
+ *
+ * Single-format collections never reach this task — `afterChange` short-circuits
+ * the queue when `formats.length <= 1`.
+ */ export const createConvertFormatsHandler = (resolvedConfig)=>{
     return async ({ input, req })=>{
         try {
             const doc = await req.payload.findByID({
@@ -13,6 +23,10 @@ export const createConvertFormatsHandler = (resolvedConfig)=>{
             });
             const collectionConfig = req.payload.collections[input.collectionSlug].config;
             const cloudStorage = isCloudStorage(collectionConfig);
+            const perCollectionConfig = resolveCollectionConfig(resolvedConfig, input.collectionSlug);
+            // Only formats beyond the primary need new files — the primary is
+            // already the parent file Payload produced natively.
+            const formatsToGenerate = perCollectionConfig.formats.slice(1);
             // Cloud storage: variant files cannot be uploaded without direct adapter access.
             // Mark as complete — CDN-level image optimization handles format conversion.
             if (cloudStorage) {
@@ -42,12 +56,8 @@ export const createConvertFormatsHandler = (resolvedConfig)=>{
                 throw new Error(`No staticDir configured for collection "${input.collectionSlug}"`);
             }
             const fileBuffer = await fetchFileBuffer(doc, collectionConfig);
-            const variants = [];
-            const perCollectionConfig = resolveCollectionConfig(resolvedConfig, input.collectionSlug);
-            // When replaceOriginal is on, the main file is already in the primary format —
-            // skip it and only generate variants for the remaining formats.
-            const formatsToGenerate = perCollectionConfig.replaceOriginal && perCollectionConfig.formats.length > 0 ? perCollectionConfig.formats.slice(1) : perCollectionConfig.formats;
             const safeFilename = path.basename(doc.filename);
+            const variants = [];
             const variantResults = await Promise.all(formatsToGenerate.map(async (format)=>{
                 const result = await convertFormat(fileBuffer, format.format, format.quality);
                 const variantFilename = `${path.parse(safeFilename).name}-optimized.${format.format}`;
@@ -63,7 +73,7 @@ export const createConvertFormatsHandler = (resolvedConfig)=>{
                 };
             }));
             variants.push(...variantResults);
-            // Compute ThumbHash in the background job to avoid blocking the sync save path
+            // Compute ThumbHash from the (already-optimized) parent buffer.
             let thumbHash;
             if (resolvedConfig.generateThumbHash) {
                 thumbHash = await generateThumbHash(fileBuffer);

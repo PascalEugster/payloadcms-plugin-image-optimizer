@@ -1,4 +1,3 @@
-import { uuidFilename } from './utilities/filenameStrategies.js';
 const resolveRegenerateButton = (value)=>{
     if (value === false) return {
         enabled: false,
@@ -13,17 +12,8 @@ const resolveRegenerateButton = (value)=>{
         allowForceAll: value.allowForceAll ?? false
     };
 };
-/**
- * Resolve the generateFilename option:
- * - Explicit `generateFilename` callback takes priority
- * - `uniqueFileNames: true` maps to `uuidFilename` for backwards compat
- * - Otherwise undefined (keep original filename)
- */ const resolveGenerateFilename = (config)=>{
-    if (config.generateFilename) return config.generateFilename;
-    if (config.uniqueFileNames) return uuidFilename;
-    return undefined;
-};
 export const resolveConfig = (config)=>({
+        adminThumbnail: config.adminThumbnail ?? 'auto',
         clientOptimization: config.clientOptimization ?? true,
         collections: config.collections,
         disabled: config.disabled ?? false,
@@ -33,14 +23,16 @@ export const resolveConfig = (config)=>({
                 quality: 80
             }
         ],
-        generateFilename: resolveGenerateFilename(config),
+        generateFilename: config.generateFilename,
         generateThumbHash: config.generateThumbHash ?? true,
         maxDimensions: config.maxDimensions ?? {
             width: 2560,
             height: 2560
         },
+        metadataPolicy: config.metadataPolicy,
         regenerateButton: resolveRegenerateButton(config.regenerateButton),
         replaceOriginal: config.replaceOriginal ?? true,
+        responseHeaders: config.responseHeaders ?? false,
         stripMetadata: config.stripMetadata ?? true
     });
 export const resolveCollectionConfig = (resolvedConfig, collectionSlug)=>{

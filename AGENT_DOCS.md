@@ -99,8 +99,6 @@ export type ImageOptimizerConfig = {
   replaceOriginal?: boolean
   responseHeaders?: ResponseHeadersOption
   stripMetadata?: boolean
-  /** @deprecated Use `generateFilename: uuidFilename` */
-  uniqueFileNames?: boolean
 }
 ```
 
@@ -109,12 +107,11 @@ export type ImageOptimizerConfig = {
 | `collections` | `Record<slug, true \| CollectionOptimizerConfig>` | **required** | Which upload collections to target. `true` = use globals. |
 | `formats` | `FormatQuality[]` | `[{ format: 'webp', quality: 80 }]` | `formats[0]` becomes the parent format (when `replaceOriginal`); `formats[1..N]` run as additive variants via the `convertFormats` job. |
 | `maxDimensions` | `{ width, height }` | `{ 2560, 2560 }` | Injected as `resizeOptions` with `fit: 'inside'`, `withoutEnlargement: true`. |
-| `stripMetadata` | `boolean` | `true` | Sets `upload.withMetadata = false` when true. Ignored when `metadataPolicy` is set. |
+| `stripMetadata` | `boolean` | `true` | Sets `upload.withMetadata = false` AND ensures the plugin's injected `formatOptions`/`resizeOptions` always trigger sharp so EXIF is actually stripped (native Payload skips sharp — and preserves EXIF — when no transform is configured). Ignored when `metadataPolicy` is set. |
 | `metadataPolicy` | `(args: { metadata, req }) => boolean \| Promise<boolean>` | — | Richer alternative. Passed through as Payload's `withMetadata` callback. Return `true` to keep, `false` to strip. Takes precedence over `stripMetadata`. |
 | `replaceOriginal` | `boolean` | `true` | When true, injects `formatOptions` for the parent file. When false, parent stays in its original format and every configured format lands as an additive variant. |
 | `generateThumbHash` | `boolean` | `true` | Plugin-owned. Runs inline in `beforeChange` for single-format configs; runs inside `convertFormats` job for multi-format configs. |
-| `generateFilename` | `(args: GenerateFilenameArgs) => string` | — | Returns filename **stem** (no extension). Built-ins: `uuidFilename`, `seoFilename`. When set, `uniqueFileNames` is ignored. |
-| `uniqueFileNames` | `boolean` | `false` | Deprecated alias for `generateFilename: uuidFilename`. |
+| `generateFilename` | `(args: GenerateFilenameArgs) => string` | — | Returns filename **stem** (no extension). Built-ins: `uuidFilename`, `seoFilename`. |
 | `clientOptimization` | `boolean` | `true` | Replace the admin upload component with `UploadOptimizer` (Canvas pre-resize). |
 | `regenerateButton` | `boolean \| { enabled?, allowForceAll? }` | `true` | Controls the collection-list regeneration button and whether "Force re-process all" is exposed. |
 | `adminThumbnail` | `'auto' \| string \| function` | `'auto'` | See below. |
@@ -359,10 +356,10 @@ type GenerateFilenameArgs = {
 
 Built-in strategies exported from the package root:
 
-- `uuidFilename` — UUID v4 stem (also what `uniqueFileNames: true` resolves to).
+- `uuidFilename` — UUID v4 stem.
 - `seoFilename` — slugified alt text + short timestamp fallback.
 
-Resolution precedence (`src/defaults.ts`): explicit `generateFilename` > `uniqueFileNames: true` → `uuidFilename` > `undefined` (keep original stem).
+Resolution (`src/defaults.ts`): `config.generateFilename` is passed through; `undefined` keeps the original stem.
 
 ### Per-size filename custom naming — not supported
 
@@ -592,17 +589,46 @@ This fixes both initial uploads and the regeneration task (which also generates 
 
 **Alternative:** `addRandomSuffix: true` on the storage adapter — fixes initial uploads only, not regeneration.
 
-## Migration from v1.x
+## Migration
+
+### From v2.0.x → v2.1.0
+
+One breaking change: the already-`@deprecated` `uniqueFileNames` option is removed.
+
+**If you have `uniqueFileNames: true` in your config:**
+
+```ts
+// Before (v2.0.x)
+imageOptimizer({
+  collections: { media: true },
+  uniqueFileNames: true,
+})
+
+// After (v2.1.0)
+import { imageOptimizer, uuidFilename } from '@inoo-ch/payload-image-optimizer'
+
+imageOptimizer({
+  collections: { media: true },
+  generateFilename: uuidFilename,
+})
+```
+
+**If you were not setting `uniqueFileNames`:** no action needed. Bump the dependency.
+
+**Detection:** TypeScript emits `Object literal may only specify known properties` on `uniqueFileNames`. Runtime-wise, a stray `uniqueFileNames: true` is silently ignored — images will keep their original filenames and you may see Vercel Blob "already exists" errors on regeneration. Grep your repo for `uniqueFileNames` before bumping.
+
+No other behavior changes. Document schema, admin UI, REST endpoints, and background tasks are identical to 2.0.x.
+
+### From v1.x → v2.x
 
 The user-facing `ImageOptimizerConfig` shape is unchanged. Existing configs work. What to verify:
 
 1. **Per-size file extensions changed.** `media-300x225.jpg` is now `media-300x225.webp` (assuming a WebP primary). If your application persists size filenames outside Payload, regenerate them.
 2. **`imageOptimizer.variants` is empty for single-format collections.** v1 pushed the primary format in; v2 does not. If any consumer code reads `variants[0]` expecting the primary, read `doc.url` / `doc.filename` instead, or check `variants.length` before indexing.
 3. **Non-override rule.** If your collection already sets `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, or per-size `formatOptions`, the plugin leaves them alone. Remove them to let the plugin manage them, or keep them to override.
-4. **`uniqueFileNames` is deprecated** (but still works). Prefer `generateFilename: uuidFilename`.
-5. **`adminThumbnail`** now defaults to `'auto'`. If you previously relied on Payload falling back to `file` (the parent URL) for admin thumbnails with a custom extension, this is a non-change; if you had no `adminThumbnail` and depended on a specific behavior, review the generated function.
-6. **Regeneration.** v2's regeneration task re-triggers the native Payload pipeline via `payload.update({ file })` with `context.imageOptimizer_regenerating`, rather than running its own sharp pass. Behaves the same from the admin UI's perspective.
-7. **No disk-level overwrite in `afterChange`.** Cloud storage adapters that relied on re-reading the final file from disk after the plugin's old `afterChange` will not see a second write event — the single write happens during `uploadFiles()`.
+4. **`adminThumbnail`** now defaults to `'auto'`. If you previously relied on Payload falling back to `file` (the parent URL) for admin thumbnails with a custom extension, this is a non-change; if you had no `adminThumbnail` and depended on a specific behavior, review the generated function.
+5. **Regeneration.** v2's regeneration task re-triggers the native Payload pipeline via `payload.update({ file })` with `context.imageOptimizer_regenerating`, rather than running its own sharp pass. Behaves the same from the admin UI's perspective.
+6. **No disk-level overwrite in `afterChange`.** Cloud storage adapters that relied on re-reading the final file from disk after the plugin's old `afterChange` will not see a second write event — the single write happens during `uploadFiles()`.
 
 Bump the dependency; in most setups no code changes are required.
 

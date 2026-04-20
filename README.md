@@ -112,8 +112,8 @@ imageOptimizer({
 | `formats` | `FormatQuality[]` | `[{ format: 'webp', quality: 80 }]` | Output formats and quality (1-100). |
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions. Images are resized to fit within these bounds. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholders for instant image previews. |
-| `stripMetadata` | `boolean` | `true` | Remove EXIF and other metadata from images. |
-| `uniqueFileNames` | `boolean` | `false` | Replace filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`). Prevents Vercel Blob "already exists" errors on uploads and regeneration. |
+| `stripMetadata` | `boolean` | `true` | Sets `upload.withMetadata: false` AND guarantees sharp runs on every upload (Payload skips sharp entirely when no transform is configured, which preserves EXIF). Use `metadataPolicy` for richer control. |
+| `generateFilename` | `(args) => string` | — | Custom filename **stem** generator. Built-ins: `uuidFilename` (UUID — prevents Vercel Blob "already exists" errors), `seoFilename` (human-readable from alt text). |
 | `clientOptimization` | `boolean` | `true` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
 | `regenerateButton` | `boolean \| { enabled?: boolean, allowForceAll?: boolean }` | `true` | Controls the regeneration UI. `false` hides it entirely. Pass an object to opt in to the `Force re-process all` checkbox (`allowForceAll: true`) — off by default so the primary action is always "Regenerate N Unoptimized". |
 | `adminThumbnail` | `'auto' \| string \| function` | `'auto'` | Injects an `upload.adminThumbnail` on each targeted collection. `'auto'` emits a function that returns a URL from `doc.filename` so admin thumbnails survive the v2 parent-extension change (`.jpg` → `.webp`). String mode is treated as a size-name reference; function mode is passed through. Respects user-set values. |
@@ -205,12 +205,14 @@ With `clientUploads: true`, files upload directly from the browser to Vercel Blo
 
 When `replaceOriginal: true` (default), the plugin changes filenames during upload (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass [`allowOverwrite`](https://vercel.com/docs/vercel-blob#overwriting-blobs) to the Vercel Blob SDK.
 
-**Fix:** Enable `uniqueFileNames` in the plugin config — replaces original filenames with UUIDs before the storage adapter sees them:
+**Fix:** Set `generateFilename: uuidFilename` — replaces original filenames with UUIDs before the storage adapter sees them:
 
 ```ts
+import { imageOptimizer, uuidFilename } from '@inoo-ch/payload-image-optimizer'
+
 imageOptimizer({
   collections: { media: true },
-  uniqueFileNames: true, // photo.jpg → a1b2c3d4-5e6f-7890-abcd-ef1234567890.webp
+  generateFilename: uuidFilename, // photo.jpg → a1b2c3d4-5e6f-7890-abcd-ef1234567890.webp
 })
 ```
 
@@ -229,20 +231,26 @@ vercelBlobStorage({
 
 ## How It Differs from Payload's Default Image Handling
 
-Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and exposes `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and per-`imageSize` `formatOptions`. v2 of this plugin **resolves your options and injects them onto Payload's upload config at init time**, then leans on `generateFileData()` to do the actual encoding. The plugin only owns what Payload doesn't do natively: ThumbHash placeholders, optimization status, optional filename strategies (UUID / SEO), additive multi-format variants, and the regenerate UI. Using `clientOptimization: true` (the default) further reduces server work for big uploads.
+Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and exposes `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and per-`imageSize` `formatOptions` — so format conversion, resizing, and EXIF stripping are all achievable natively. v2 of this plugin **resolves your options and injects them onto Payload's upload config at init time**, then leans on `generateFileData()` to do the actual encoding. The plugin's value is the layer *around* that pipeline: coordinated defaults, per-collection overrides, ThumbHash placeholders, optimization status, filename strategies, additive multi-format variants, the regenerate UI, and the client-side pre-resize.
 
 ### Comparison
 
 | Capability | Payload Default | With This Plugin |
 |---|---|---|
-| Resize to max dimensions | Manual via `imageSizes` config | Automatic — configure once globally or per-collection |
-| WebP/AVIF conversion | Requires custom hooks | Built-in, zero-config |
-| EXIF metadata stripping | Not built-in | Automatic (configurable) |
-| Blur hash placeholders | Requires custom hooks | ThumbHash generated automatically |
-| Optimization status & savings | Not available | Admin sidebar panel per image |
-| Bulk re-process existing images | Not available | One-click regeneration with progress tracking |
-| Next.js `<Image>` with blur placeholder | Manual wiring | Drop-in `<ImageBox>` / `<FadeImage>` components |
-| Per-collection format/quality overrides | N/A | Supported |
+| Resize to max dimensions | `upload.resizeOptions` (per collection) | Same, plus global default + per-collection override from one config block |
+| WebP/AVIF conversion | `upload.formatOptions` / per-size `formatOptions` — one format per size | Single config covers parent file + all sizes; **additive** multi-format (WebP + AVIF on the same size) |
+| EXIF metadata stripping | Sharp strips by default (`withMetadata: false`) **only when sharp runs** | Guaranteed — plugin always triggers sharp even for unchanged files |
+| Blur hash placeholders | Not supported | ThumbHash generated per image |
+| Optimization status & savings | Not supported | Admin sidebar panel per image |
+| Bulk re-process existing images | Not supported | One-click regeneration with progress tracking |
+| Next.js `<Image>` with blur + focal point | Manual wiring | Drop-in `<ImageBox>` / `getOptimizedImageProps()` |
+| Per-collection format/quality overrides | Repeat config per collection | Single plugin block with per-collection overrides |
+
+### Native edge cases this plugin handles for you
+
+- **`withoutEnlargement` silent drop** — Payload's native default (`undefined`) silently omits any `imageSize` where both dimensions are smaller than the target (the size appears as `{ filename: null }` in the doc). The plugin sets `withoutEnlargement: true` so small uploads keep a usable variant.
+- **Per-size `formatOptions` does not inherit** — Native `imageSize.formatOptions` does not inherit from `upload.formatOptions`; each size would need repeating. The plugin injects the primary format onto every size automatically.
+- **Sharp-skip EXIF leak** — If no `formatOptions`/`resizeOptions`/`trimOptions` is set and the image is not animated, native Payload skips sharp entirely and writes the original bytes (EXIF intact). The plugin's injected `resizeOptions` + `formatOptions` guarantee sharp always runs, closing this gap.
 
 ### CPU & Resource Impact
 

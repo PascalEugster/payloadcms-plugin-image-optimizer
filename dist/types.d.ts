@@ -48,7 +48,67 @@ export type ResolvedRegenerateButtonConfig = {
     enabled: boolean;
     allowForceAll: boolean;
 };
+/**
+ * Metadata-keep policy. When set, takes precedence over the simple
+ * `stripMetadata: boolean` toggle and is passed through as Payload's
+ * `withMetadata` callback.
+ *
+ * Return `true` to KEEP metadata for this image, `false` to strip it.
+ *
+ * Non-override rule: if the collection already has `upload.withMetadata`, the
+ * plugin leaves it untouched.
+ */
+export type MetadataPolicy = (args: {
+    metadata: any;
+    req: any;
+}) => boolean | Promise<boolean>;
+/**
+ * Response header policy applied to file responses for targeted collections.
+ *
+ * - `false` (default) — do nothing.
+ * - `'immutable'` — inject a `modifyResponseHeaders` that sets
+ *   `Cache-Control: public, max-age=31536000, immutable`. Only safe when
+ *   filenames are content-stable (`generateFilename` is set, e.g. `uuidFilename`
+ *   or `seoFilename`). Otherwise the plugin emits a `payload.logger.warn` at
+ *   init explaining the risk of stale cached files when filenames are reused.
+ * - function — passed through to Payload as-is. Receives a `{ doc }` arg
+ *   alongside `headers` (for richer per-doc decisions if Payload supplies it).
+ *
+ * Non-override rule: if the collection already has `upload.modifyResponseHeaders`,
+ * the plugin leaves it untouched.
+ */
+export type ResponseHeadersOption = false | 'immutable' | ((headers: Headers, args: {
+    doc: unknown;
+}) => Headers | void);
+/**
+ * `adminThumbnail` strategy injected on each targeted collection.
+ *
+ * - `'auto'` (default) — inject a function form that returns a URL derived from
+ *   `doc.filename`. Survives the parent-file extension change that v2 introduces
+ *   when `replaceOriginal: true` (e.g. `.jpg` → `.webp`), where a hand-written
+ *   string-name reference like `'thumbnail'` would still work but a custom URL
+ *   helper might break.
+ * - `string` — passed through to Payload as a size-name reference (e.g. `'thumbnail'`).
+ * - function — passed through to Payload as-is.
+ *
+ * Non-override rule: if the collection already has `upload.adminThumbnail`, the
+ * plugin leaves it untouched.
+ */
+export type AdminThumbnailOption = 'auto' | string | ((args: {
+    doc: {
+        filename?: string | null;
+    };
+}) => string | null | undefined);
 export type ImageOptimizerConfig = {
+    /** Inject an `adminThumbnail` for targeted collections.
+     *
+     * - `'auto'` (default) — inject a function that returns the file URL from
+     *   `doc.filename`, surviving the v2 parent-extension change.
+     * - string — pass through as a size-name reference.
+     * - function — pass through as-is.
+     *
+     * Non-override: respects an existing `upload.adminThumbnail`. */
+    adminThumbnail?: AdminThumbnailOption;
     clientOptimization?: boolean;
     collections: Partial<Record<CollectionSlug, true | CollectionOptimizerConfig>>;
     disabled?: boolean;
@@ -58,10 +118,8 @@ export type ImageOptimizerConfig = {
      * The plugin appends the correct extension based on format conversion settings.
      *
      * Built-in strategies:
-     * - `uuidFilename` — UUID-based, collision-free (same as `uniqueFileNames: true`)
+     * - `uuidFilename` — UUID-based, collision-free
      * - `seoFilename` — Human-readable from alt text + timestamp
-     *
-     * When set, `uniqueFileNames` is ignored.
      *
      * @example
      * ```ts
@@ -79,6 +137,22 @@ export type ImageOptimizerConfig = {
         width: number;
         height: number;
     };
+    /** Richer metadata-keep policy. When set, takes precedence over `stripMetadata`.
+     * Passed through as Payload's `withMetadata` callback.
+     *
+     * Return `true` to KEEP metadata, `false` to strip.
+     *
+     * Non-override: respects an existing `upload.withMetadata`.
+     *
+     * @example
+     * ```ts
+     * imageOptimizer({
+     *   collections: { media: true },
+     *   metadataPolicy: ({ metadata }) => metadata.format === 'jpeg', // keep EXIF on JPEGs only
+     * })
+     * ```
+     */
+    metadataPolicy?: MetadataPolicy;
     /** Regeneration button config for the collection list view.
      *
      * - `true` (default) — show the button; default action is "Regenerate N Unoptimized".
@@ -88,12 +162,16 @@ export type ImageOptimizerConfig = {
      */
     regenerateButton?: boolean | RegenerateButtonConfig;
     replaceOriginal?: boolean;
+    /** Opt-in response header policy for file responses on targeted collections.
+     *
+     * - `false` (default) — do nothing.
+     * - `'immutable'` — inject `Cache-Control: public, max-age=31536000, immutable`.
+     *   Only safe when `generateFilename` is set; otherwise the plugin warns at init.
+     * - function — pass through as-is.
+     *
+     * Non-override: respects an existing `upload.modifyResponseHeaders`. */
+    responseHeaders?: ResponseHeadersOption;
     stripMetadata?: boolean;
-    /** Replace original filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`).
-     * Prevents Vercel Blob "already exists" errors and avoids leaking original filenames.
-     * Defaults to `false`.
-     * @deprecated Use `generateFilename: uuidFilename` instead. */
-    uniqueFileNames?: boolean;
 };
 export type ResolvedCollectionOptimizerConfig = {
     formats: FormatQuality[];
@@ -104,13 +182,19 @@ export type ResolvedCollectionOptimizerConfig = {
     replaceOriginal: boolean;
 };
 export type ResolvedImageOptimizerConfig = Required<Pick<ImageOptimizerConfig, 'formats' | 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>> & {
+    /** Resolved adminThumbnail option. Defaults to `'auto'`. */
+    adminThumbnail: AdminThumbnailOption;
     clientOptimization: boolean;
     collections: ImageOptimizerConfig['collections'];
     disabled: boolean;
     /** Resolved filename generator. `undefined` means keep original filename. */
     generateFilename?: GenerateFilename;
+    /** Resolved metadata-keep policy. When set, takes precedence over `stripMetadata`. */
+    metadataPolicy?: MetadataPolicy;
     regenerateButton: ResolvedRegenerateButtonConfig;
     replaceOriginal: boolean;
+    /** Resolved response-header policy. Defaults to `false`. */
+    responseHeaders: ResponseHeadersOption;
 };
 export type ImageOptimizerData = {
     thumbHash?: string | null;

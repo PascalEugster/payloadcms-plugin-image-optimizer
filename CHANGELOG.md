@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.1.0 — Honest positioning + `uniqueFileNames` removed
+
+A documentation and API-cleanup release following an audit of what this plugin actually adds on top of Payload core. No behavior changes for images; no hook rewrites.
+
+### Breaking
+
+- **`uniqueFileNames` option removed.** It was already marked `@deprecated` in 2.0.0 and was a straight alias for `generateFilename: uuidFilename`. If you were relying on it, update your config:
+
+  ```ts
+  // Before
+  imageOptimizer({ collections: { media: true }, uniqueFileNames: true })
+
+  // After
+  import { imageOptimizer, uuidFilename } from '@inoo-ch/payload-image-optimizer'
+  imageOptimizer({ collections: { media: true }, generateFilename: uuidFilename })
+  ```
+
+  TypeScript will flag this as an unknown property. Nothing else changes — `uuidFilename` produces the same UUID-stem output.
+
+### Docs
+
+- **README rewritten to be honest about what Payload does natively.** Previous Features section read like the plugin owned format conversion, resize, and EXIF stripping — all of which Payload 3 exposes via `upload.formatOptions`, `upload.resizeOptions`, and `upload.withMetadata`. New structure separates:
+  - *Things Payload can do natively — this plugin makes them turnkey* (coordinated defaults, per-collection overrides, opinionated quality ladder)
+  - *Things Payload does not do out of the box* (ThumbHash, bulk regeneration, status UI, client pre-resize, filename strategies, Next.js display components)
+- **New "Native edge cases this plugin handles for you" subsection** documenting three real gotchas the plugin closes:
+  - `withoutEnlargement: undefined` silent drop of small images from `imageSizes`
+  - Per-size `formatOptions` does not inherit from `upload.formatOptions`
+  - Sharp-skip EXIF leak when no transform is configured (plugin's injected `resizeOptions` + `formatOptions` guarantee sharp always runs)
+- **`stripMetadata` option docs rewritten** — it no longer claims to own EXIF stripping (sharp does that when it runs); it's now documented as guaranteeing sharp *always* runs, which is the real contribution.
+- **AGENT_DOCS migration section updated** with a v2.0.x → v2.1.0 block.
+
+### Investigation artifacts
+
+Under `.planning/investigation/`:
+- `payload-native-audit.md` — what Payload core 3.79 does out of the box, with source cites
+- `plugin-surface-map.md` — 21 plugin features tiered A/B/C against native coverage
+- `RECOMMENDATIONS.md` — cut/keep synthesis, which drove this release
+
+---
+
 ## 2.0.0 — Config-injection architecture
 
 **Breaking change.** The plugin no longer runs its own sharp pipeline for resize, format conversion, or metadata stripping. Instead, at plugin init it resolves your options and injects them onto each targeted upload collection as native Payload upload config:

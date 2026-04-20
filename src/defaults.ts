@@ -6,8 +6,6 @@ import type {
   ResolvedImageOptimizerConfig,
   ResolvedRegenerateButtonConfig,
 } from './types.js'
-import { uuidFilename } from './utilities/filenameStrategies.js'
-
 const resolveRegenerateButton = (
   value: ImageOptimizerConfig['regenerateButton'],
 ): ResolvedRegenerateButtonConfig => {
@@ -19,18 +17,6 @@ const resolveRegenerateButton = (
   }
 }
 
-/**
- * Resolve the generateFilename option:
- * - Explicit `generateFilename` callback takes priority
- * - `uniqueFileNames: true` maps to `uuidFilename` for backwards compat
- * - Otherwise undefined (keep original filename)
- */
-const resolveGenerateFilename = (config: ImageOptimizerConfig) => {
-  if (config.generateFilename) return config.generateFilename
-  if (config.uniqueFileNames) return uuidFilename
-  return undefined
-}
-
 export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimizerConfig => ({
   adminThumbnail: config.adminThumbnail ?? 'auto',
   clientOptimization: config.clientOptimization ?? true,
@@ -39,7 +25,7 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   formats: config.formats ?? [
     { format: 'webp', quality: 80 },
   ],
-  generateFilename: resolveGenerateFilename(config),
+  generateFilename: config.generateFilename,
   generateThumbHash: config.generateThumbHash ?? true,
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
   metadataPolicy: config.metadataPolicy,

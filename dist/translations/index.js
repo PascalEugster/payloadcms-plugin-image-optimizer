@@ -16,7 +16,8 @@ export const translations = {
             done: 'Done!',
             optimizedCount: '{{complete}}/{{total}} optimized',
             failed: '{{count}} failed.',
-            allImagesOptimized: 'All {{count}} images optimized'
+            allImagesOptimized: 'All {{count}} images optimized',
+            optimizing: 'Optimizing image…'
         }
     },
     de: {
@@ -36,7 +37,8 @@ export const translations = {
             done: 'Fertig!',
             optimizedCount: '{{complete}}/{{total}} optimiert',
             failed: '{{count}} fehlgeschlagen.',
-            allImagesOptimized: 'Alle {{count}} Bilder optimiert'
+            allImagesOptimized: 'Alle {{count}} Bilder optimiert',
+            optimizing: 'Bild wird optimiert…'
         }
     },
     fr: {
@@ -56,7 +58,8 @@ export const translations = {
             done: 'Terminé !',
             optimizedCount: '{{complete}}/{{total}} optimisé(s)',
             failed: '{{count}} échoué(s).',
-            allImagesOptimized: 'Les {{count}} images sont optimisées'
+            allImagesOptimized: 'Les {{count}} images sont optimisées',
+            optimizing: "Optimisation de l'image…"
         }
     }
 };

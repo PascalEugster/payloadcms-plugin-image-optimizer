@@ -122,10 +122,8 @@ export type ImageOptimizerConfig = {
    * The plugin appends the correct extension based on format conversion settings.
    *
    * Built-in strategies:
-   * - `uuidFilename` — UUID-based, collision-free (same as `uniqueFileNames: true`)
+   * - `uuidFilename` — UUID-based, collision-free
    * - `seoFilename` — Human-readable from alt text + timestamp
-   *
-   * When set, `uniqueFileNames` is ignored.
    *
    * @example
    * ```ts
@@ -175,11 +173,6 @@ export type ImageOptimizerConfig = {
    * Non-override: respects an existing `upload.modifyResponseHeaders`. */
   responseHeaders?: ResponseHeadersOption
   stripMetadata?: boolean
-  /** Replace original filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`).
-   * Prevents Vercel Blob "already exists" errors and avoids leaking original filenames.
-   * Defaults to `false`.
-   * @deprecated Use `generateFilename: uuidFilename` instead. */
-  uniqueFileNames?: boolean
 }
 
 export type ResolvedCollectionOptimizerConfig = {
