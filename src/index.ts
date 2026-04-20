@@ -8,7 +8,6 @@ import { getImageOptimizerField } from './fields/imageOptimizerField.js'
 import { createBeforeChangeHook } from './hooks/beforeChange.js'
 import { createBeforeOperationHook } from './hooks/beforeOperation.js'
 import { createAfterChangeHook } from './hooks/afterChange.js'
-import { createConvertFormatsHandler } from './tasks/convertFormats.js'
 import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js'
 import { createRegenerateHandler, createRegenerateStatusHandler, createCancelHandler } from './endpoints/regenerate.js'
 
@@ -282,18 +281,6 @@ export const imageOptimizer =
         ...config.jobs,
         tasks: [
           ...(config.jobs?.tasks || []),
-          {
-            slug: 'imageOptimizer_convertFormats',
-            inputSchema: [
-              { name: 'collectionSlug', type: 'text', required: true },
-              { name: 'docId', type: 'text', required: true },
-            ],
-            outputSchema: [
-              { name: 'variantsGenerated', type: 'number' },
-            ],
-            retries: 2,
-            handler: createConvertFormatsHandler(resolvedConfig),
-          } as any,
           {
             slug: 'imageOptimizer_regenerateDocument',
             inputSchema: [
