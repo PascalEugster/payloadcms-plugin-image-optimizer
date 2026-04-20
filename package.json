@@ -1,6 +1,6 @@
 {
   "name": "@inoo-ch/payload-image-optimizer",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "description": "Payload CMS plugin: client-side pre-resize, ThumbHash blur placeholders, filename strategies, bulk regeneration UI, and Next.js display components — on top of Payload's native sharp pipeline",
   "license": "MIT",
   "keywords": [

@@ -52,6 +52,14 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
         doc = await req.payload.findByID({
           collection: input.collectionSlug as CollectionSlug,
           id: input.docId,
+          // depth: 0 — we only read scalar fields here (mimeType, filename,
+          // url, imageOptimizer). Default depth (2) populates every relation
+          // on the doc — including nested folder hierarchies — which on
+          // production deployments adds many DB round-trips to each regen
+          // for no benefit (e.g. `folder` → parent folder → sibling
+          // documentsAndFolders array). Observed ~4-8s saved per job on
+          // media docs nested in populated folder trees.
+          depth: 0,
         })
       } catch (err) {
         if (isNotFound(err)) {
@@ -92,6 +100,11 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
       await req.payload.update({
         collection: input.collectionSlug as CollectionSlug,
         id: input.docId,
+        // depth: 0 — skip re-hydrating the updated doc's relations in the
+        // response. We don't use the return value; the hook writes through
+        // to the DB and the admin UI polls for the fresh state separately.
+        // Pairs with the depth: 0 on findByID above.
+        depth: 0,
         data:
           typeof carriedOriginalSize === 'number'
             ? { imageOptimizer: { originalSize: carriedOriginalSize } }
@@ -125,6 +138,7 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
         await req.payload.update({
           collection: input.collectionSlug as CollectionSlug,
           id: input.docId,
+          depth: 0,
           data: {
             imageOptimizer: {
               status: 'error',

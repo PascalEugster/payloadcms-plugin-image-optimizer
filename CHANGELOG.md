@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.0.3 — Fix slow regeneration on docs in populated folder hierarchies
+
+### Fixed
+
+- **Regeneration jobs now read the target doc with `depth: 0`.** The `imageOptimizer_regenerateDocument` task was calling `payload.findByID` and `payload.update` without specifying `depth`, so Payload defaulted to `depth: 2` and recursively populated every relation on the doc. On projects using Payload's folder feature (or any collection with deep nested relations), this meant each regen pulled a full folder tree — parent folders, sibling `documentsAndFolders` arrays — producing dozens of extra DB round-trips before the sharp pipeline even started. Production log analysis on a single regen showed ~12s spent in this prep phase for a 47KB WebP. The task now passes `depth: 0` on both the initial read and the `payload.update` call (we don't use the update's return value) — scalar fields are all that's needed. Expect 4-8s faster per regenerate on cloud-stored media in folder-heavy collections.
+
+### Internal
+
+- Matching `depth: 0` added to the catch-block error-writeback `payload.update` for consistency.
+
+---
+
 ## 3.0.2 — Silence retry spam from regenerate jobs on deleted docs
 
 ### Fixed
