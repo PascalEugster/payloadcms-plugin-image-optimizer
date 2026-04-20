@@ -83,6 +83,9 @@ describe('Image Optimizer Plugin', () => {
     expect(doc.imageOptimizer).toBeDefined()
     expect(doc.imageOptimizer.originalSize).toBeGreaterThan(0)
     expect(doc.imageOptimizer.optimizedSize).toBeGreaterThan(0)
+    // v2: originalSize is captured by the beforeOperation hook before Payload
+    // mutates req.file. Optimization should produce a smaller file.
+    expect(doc.imageOptimizer.optimizedSize).toBeLessThan(doc.imageOptimizer.originalSize)
     expect(doc.imageOptimizer.status).toBe('pending')
 
     // Verify the saved file was resized within max dimensions
@@ -90,6 +93,65 @@ describe('Image Optimizer Plugin', () => {
     const metadata = await sharp(savedPath).metadata()
     expect(metadata.width).toBeLessThanOrEqual(2560)
     expect(metadata.height).toBeLessThanOrEqual(2560)
+    // v2: replaceOriginal + formats[0] = webp → parent file is webp natively
+    expect(metadata.format).toBe('webp')
+    expect(doc.mimeType).toBe('image/webp')
+    expect(doc.filename).toMatch(/\.webp$/)
+  })
+
+  test('v2 — imageSizes are emitted as webp natively (config-injection)', async () => {
+    const buffer = await createTestImage(2000, 1500)
+
+    const doc = await payload.create({
+      collection: 'media',
+      data: {},
+      file: {
+        data: buffer,
+        mimetype: 'image/jpeg',
+        name: 'test-sizes-webp.jpg',
+        size: buffer.length,
+      },
+    })
+
+    // Payload's createImageSizes uses formatOptions on each imageSize, which
+    // we inject at plugin init. Each size's filename + mimeType reflects webp.
+    const sizes = (doc as any).sizes as Record<string, any>
+    expect(sizes).toBeDefined()
+    for (const [sizeName, sizeData] of Object.entries(sizes)) {
+      if (!sizeData || !sizeData.filename) continue
+      expect(sizeData.mimeType, `${sizeName}.mimeType`).toBe('image/webp')
+      expect(sizeData.filename, `${sizeName}.filename`).toMatch(/\.webp$/)
+    }
+  })
+
+  test('v2 — aspect-mismatched sizes (og 1200×630, square 500×500) still produced but excluded by srcset filter', async () => {
+    // Regression harness for the v1.11.1 aspect-mismatch fix. With v2's native
+    // pipeline, every `og` and `square` size is produced via Payload's
+    // createImageSizes which respects the fit:'cover' crop — the resulting
+    // variants ARE aspect-mismatched relative to the source (4:3-ish) and
+    // would have polluted responsive srcsets without our utilities filter.
+    const buffer = await createTestImage(1700, 1365)
+
+    const doc = await payload.create({
+      collection: 'media',
+      data: {},
+      file: {
+        data: buffer,
+        mimetype: 'image/jpeg',
+        name: 'test-aspect-regression.jpg',
+        size: buffer.length,
+      },
+    })
+
+    const sizes = (doc as any).sizes as Record<string, any>
+    expect(sizes.og?.width).toBe(1200)
+    expect(sizes.og?.height).toBe(630)
+    expect(sizes.square?.width).toBe(500)
+    expect(sizes.square?.height).toBe(500)
+    // Source aspect-ratio sizes still aspect-correct
+    expect(sizes.large?.width).toBe(1400)
+    // 1700/1365 → 1400×1124 with fit:'inside'
+    expect(sizes.large?.height).toBe(1124)
   })
 
   test('should generate thumbHash as valid base64 string', async () => {
