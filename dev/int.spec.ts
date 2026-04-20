@@ -5,7 +5,7 @@ import { getPayload } from 'payload'
 import path from 'path'
 import fs from 'fs/promises'
 import sharp from 'sharp'
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 import { fileURLToPath } from 'url'
 
 import { resolveConfig } from '../src/defaults.js'
@@ -506,5 +506,44 @@ describe('Image Optimizer Plugin', () => {
     const metadata = await sharp(savedPath).metadata()
     expect(metadata.width).toBeLessThanOrEqual(256)
     expect(metadata.height).toBeLessThanOrEqual(256)
+  })
+
+  test('regeneration of a deleted doc resolves as skipped without throwing', async () => {
+    // Reproduces the production log spam: a job queued for a doc that gets
+    // deleted before the worker runs. With the NotFound guard in
+    // regenerateDocument.ts the job should resolve cleanly (no retries, no
+    // "Failed to persist error status" noise) rather than throwing.
+    const buffer = await createTestImage(400, 300)
+    const doc = await payload.create({
+      collection: 'media',
+      data: {},
+      file: {
+        data: buffer,
+        mimetype: 'image/jpeg',
+        name: 'test-regen-deleted.jpg',
+        size: buffer.length,
+      },
+      context: { imageOptimizer_skip: true },
+    })
+
+    await payload.delete({ collection: 'media', id: doc.id })
+
+    const errorSpy = vi.spyOn(payload.logger, 'error')
+
+    await payload.jobs.queue({
+      task: 'imageOptimizer_regenerateDocument',
+      input: { collectionSlug: 'media', docId: String(doc.id) },
+    })
+    await payload.jobs.run()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    // Guard catches findByID NotFound → returns terminal skip. No error
+    // writeback attempt happens, so no "Failed to persist error status" log.
+    const persistFailureLog = errorSpy.mock.calls.some((call) =>
+      JSON.stringify(call).includes('Failed to persist error status'),
+    )
+    expect(persistFailureLog).toBe(false)
+
+    errorSpy.mockRestore()
   })
 })

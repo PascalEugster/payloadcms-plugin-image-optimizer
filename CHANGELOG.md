@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.0.2 — Silence retry spam from regenerate jobs on deleted docs
+
+### Fixed
+
+- **Stale regenerate jobs no longer retry-loop against deleted docs.** When a media doc was deleted after a regenerate job was queued (possible in normal admin workflows), `imageOptimizer_regenerateDocument` would throw `NotFound` on its `findByID` call, bubble up through Payload's retry machinery, get retried twice, and each retry would ALSO fail the catch block's error-status writeback — producing repeated `"Failed to persist error status for image optimizer regeneration"` log entries for a single vanished doc. The task now detects `NotFound` (HTTP 404 APIError) at the initial read and returns `{ status: 'skipped', reason: 'doc-deleted' }` — terminal, no retries, no noise. The catch block has the same guard so a doc deleted mid-flight also resolves cleanly.
+
+### Internal
+
+- New `isNotFound(err)` helper checks `err.status === 404` — avoids a direct import of Payload's internal `NotFound` class while still matching it reliably.
+- Regression test added: queue → delete → run, assert no "Failed to persist error status" log.
+
+---
+
 ## 3.0.1 — Accurate savings stat when client-side optimization is on
 
 ### Fixed

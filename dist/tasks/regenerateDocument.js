@@ -2,6 +2,13 @@ import path from 'path';
 import { fetchFileBuffer } from '../utilities/storage.js';
 const GLOBAL_SLUG = 'image-optimizer-state';
 /**
+ * Detects Payload's `NotFound` (HTTP 404) error. Matches any APIError-derived
+ * class with a 404 status — including the "doc was deleted between queue and
+ * run" case that produces retry noise without this guard.
+ */ const isNotFound = (err)=>{
+    return typeof err === 'object' && err !== null && err.status === 404;
+};
+/**
  * Regeneration via Payload's native pipeline.
  *
  * Reads the existing parent file, then calls `payload.update({ file })` to
@@ -12,6 +19,11 @@ const GLOBAL_SLUG = 'image-optimizer-state';
  * hook re-stamps `imageOptimizer` (status + thumbhash).
  *
  * For cloud storage the same call re-uploads via the adapter's afterChange.
+ *
+ * Deleted docs (typically from stale retries whose target was deleted between
+ * queue and run) are treated as a terminal no-op: the task returns a
+ * `doc-deleted` status instead of throwing so Payload's job queue doesn't
+ * keep retrying, and the catch-block error writeback doesn't double-log.
  */ export const createRegenerateDocumentHandler = (resolvedConfig)=>{
     return async ({ input, req })=>{
         try {
@@ -32,10 +44,26 @@ const GLOBAL_SLUG = 'image-optimizer-state';
             } catch  {
             // Global may not exist yet — proceed normally
             }
-            const doc = await req.payload.findByID({
-                collection: input.collectionSlug,
-                id: input.docId
-            });
+            let doc;
+            try {
+                doc = await req.payload.findByID({
+                    collection: input.collectionSlug,
+                    id: input.docId
+                });
+            } catch (err) {
+                if (isNotFound(err)) {
+                    // Stale retry for a doc that was deleted after the job was queued.
+                    // Return terminal skip — no throw means no further retries, no
+                    // noise in the logs for something we can't recover from.
+                    return {
+                        output: {
+                            status: 'skipped',
+                            reason: 'doc-deleted'
+                        }
+                    };
+                }
+                throw err;
+            }
             // Skip non-image documents
             if (!doc.mimeType || !doc.mimeType.startsWith('image/')) {
                 return {
@@ -90,6 +118,17 @@ const GLOBAL_SLUG = 'image-optimizer-state';
                 }
             };
         } catch (err) {
+            // If the doc vanished mid-flight (e.g. deleted during the pipeline),
+            // treat as a terminal skip — same as the findByID NotFound path above.
+            // Prevents retry-spam for an unrecoverable state.
+            if (isNotFound(err)) {
+                return {
+                    output: {
+                        status: 'skipped',
+                        reason: 'doc-deleted'
+                    }
+                };
+            }
             const errorMessage = err instanceof Error ? err.message : String(err);
             try {
                 await req.payload.update({
@@ -106,11 +145,16 @@ const GLOBAL_SLUG = 'image-optimizer-state';
                     }
                 });
             } catch (updateErr) {
-                req.payload.logger.error({
-                    err: updateErr,
-                    docId: input.docId,
-                    collectionSlug: input.collectionSlug
-                }, 'Failed to persist error status for image optimizer regeneration');
+                // Suppress the double-log when the error-writeback also hits a
+                // NotFound — nothing to persist to, and the outer throw would be
+                // retried anyway. For other update failures, keep the log.
+                if (!isNotFound(updateErr)) {
+                    req.payload.logger.error({
+                        err: updateErr,
+                        docId: input.docId,
+                        collectionSlug: input.collectionSlug
+                    }, 'Failed to persist error status for image optimizer regeneration');
+                }
             }
             throw err;
         }

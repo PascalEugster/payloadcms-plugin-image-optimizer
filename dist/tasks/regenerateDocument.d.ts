@@ -10,6 +10,11 @@ import type { ResolvedImageOptimizerConfig } from '../types.js';
  * hook re-stamps `imageOptimizer` (status + thumbhash).
  *
  * For cloud storage the same call re-uploads via the adapter's afterChange.
+ *
+ * Deleted docs (typically from stale retries whose target was deleted between
+ * queue and run) are treated as a terminal no-op: the task returns a
+ * `doc-deleted` status instead of throwing so Payload's job queue doesn't
+ * keep retrying, and the catch-block error writeback doesn't double-log.
  */
 export declare const createRegenerateDocumentHandler: (resolvedConfig: ResolvedImageOptimizerConfig) => ({ input, req }: {
     input: {
