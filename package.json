@@ -1,20 +1,19 @@
 {
   "name": "@inoo-ch/payload-image-optimizer",
-  "version": "2.2.0",
-  "description": "Payload CMS plugin for automatic image optimization — WebP/AVIF conversion, resize, EXIF strip, ThumbHash placeholders, and bulk regeneration",
+  "version": "3.0.0",
+  "description": "Payload CMS plugin: client-side pre-resize, ThumbHash blur placeholders, filename strategies, bulk regeneration UI, and Next.js display components — on top of Payload's native sharp pipeline",
   "license": "MIT",
   "keywords": [
     "payload",
     "payloadcms",
     "plugin",
     "image",
-    "optimization",
-    "webp",
-    "avif",
     "thumbhash",
-    "sharp",
-    "resize",
-    "compress"
+    "blur-placeholder",
+    "client-resize",
+    "filename-strategy",
+    "webp",
+    "sharp"
   ],
   "homepage": "https://github.com/PascalEugster/payloadcms-plugin-image-optimizer",
   "repository": {
