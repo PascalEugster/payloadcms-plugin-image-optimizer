@@ -33,6 +33,14 @@ Running sharp ourselves duplicated work Payload already did, fought with cloud-s
 
 Bump the dependency. No code changes needed for typical setups. If you have pre-existing `formatOptions` / `resizeOptions` on a Payload upload collection, the plugin will respect them — or remove them and let the plugin manage them via its own config.
 
+### UploadOptimizer: Save-gate + hardened fallbacks
+
+Addresses a client-side race where the Payload admin could POST `/api/media` before `UploadOptimizer`'s async Canvas resize finished. In production this surfaced as a 400 "MissingFile" log entry preceding every successful 201; locally it manifested as the resize being silently discarded (the oversized original was sent instead).
+
+- Save is now gated via `useDocumentInfo().setUploadStatus('uploading')` for the duration of the resize — Payload's `SaveButton` short-circuits on this status, so submit never runs with a stale field snapshot. Reset on completion, error, and unmount.
+- Visible "Optimizing image…" spinner hint below the upload widget while resizing, with new i18n key `plugin-imageOptimizer:optimizing` (en / de / fr).
+- `resizeImage` extracted to `src/utilities/clientResize.ts` and hardened — every failure path (`createImageBitmap` throw, `canvas.toBlob` null, empty blob, missing 2D context) falls back to the original `File` rather than producing a garbage `File` from a null BlobPart.
+
 ### Additional config-injection options (additive, non-breaking)
 
 - **`adminThumbnail`** — `'auto' | string | function`, defaults to `'auto'`. The `'auto'` mode injects a function that returns a URL from `doc.filename`, so admin thumbnails survive the v2 parent-extension change (e.g. `.jpg` → `.webp`). String and function modes pass through to Payload as-is. Honors the non-override rule.

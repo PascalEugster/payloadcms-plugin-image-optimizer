@@ -162,6 +162,8 @@ imageOptimizer({
 
 **What stays server-side:** Format conversion (WebP/AVIF), ThumbHash generation, and variant creation still happen on the server with sharp for quality consistency. The client only handles resize — the highest-impact optimization with zero quality trade-off.
 
+**Save-button behavior:** While the client-side resize is running, the Save button is disabled and an "Optimizing image…" spinner appears below the uploader. The plugin sets `useDocumentInfo().setUploadStatus('uploading')` for the duration of the resize so Payload's `SaveButton` short-circuits — submit never runs with a stale field snapshot. Status is reset to `'idle'` on completion, error, and unmount. The hint is localized via the `plugin-imageOptimizer:optimizing` i18n key (en / de / fr included).
+
 **Limitations:** Only applies to single-file uploads in the admin panel. Bulk uploads and API/programmatic uploads are processed server-side as usual.
 
 ## How It Works (v2)
