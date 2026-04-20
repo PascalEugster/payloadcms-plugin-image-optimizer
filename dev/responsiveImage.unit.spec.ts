@@ -159,13 +159,75 @@ describe('createVariantLoader', () => {
     expect(createVariantLoader({ url: '/x.jpg', width: 100, height: 100 })).toBeUndefined()
   })
 
-  test('appends updatedAt as cache-buster on variant urls', () => {
+  test('appends updatedAt as url-encoded cache-buster on variant urls', () => {
     const loader = createVariantLoader({
       ...portraitMedia,
-      updatedAt: '2026-04-15T12:00:00Z',
+      updatedAt: '2026-04-20T10:45:30.123Z',
     })!
 
     const url = loader({ src: '/media/pascal.jpg', width: 600 })
-    expect(url).toBe('/media/pascal-600.jpg?2026-04-15T12:00:00Z')
+    // Colons in the ISO timestamp must be percent-encoded (%3A) so CDNs
+    // and URL parsers treat the value as a single opaque query param.
+    expect(url).toBe('/media/pascal-600.jpg?v=2026-04-20T10%3A45%3A30.123Z')
+  })
+
+  test('omits cache-bust suffix when updatedAt is missing', () => {
+    const loader = createVariantLoader({
+      ...portraitMedia,
+      updatedAt: undefined,
+    })!
+
+    const url = loader({ src: '/media/pascal.jpg', width: 600 })
+    expect(url).toBe('/media/pascal-600.jpg')
+    expect(url).not.toContain('?')
+  })
+
+  test('omits cache-bust suffix when updatedAt is null', () => {
+    const loader = createVariantLoader({
+      ...portraitMedia,
+      // Payload may surface null for unpersisted resources
+      updatedAt: null as unknown as undefined,
+    })!
+
+    const url = loader({ src: '/media/pascal.jpg', width: 600 })
+    expect(url).toBe('/media/pascal-600.jpg')
+    expect(url).not.toContain('?')
+  })
+
+  test('uses & separator when the variant url already has a query string', () => {
+    // Some CDNs serve pre-generated variants through signed or parameterized URLs.
+    // Naively appending `?v=...` would corrupt the existing query; the loader must
+    // detect an existing `?` and switch to `&`.
+    const loader = createVariantLoader({
+      ...portraitMedia,
+      sizes: {
+        ...portraitMedia.sizes,
+        small: {
+          url: '/media/pascal-600.jpg?sig=abc123',
+          width: 600,
+          height: 482,
+        },
+      },
+      updatedAt: '2026-04-20T10:45:30.123Z',
+    })!
+
+    const url = loader({ src: '/media/pascal.jpg', width: 600 })
+    expect(url).toBe('/media/pascal-600.jpg?sig=abc123&v=2026-04-20T10%3A45%3A30.123Z')
+  })
+
+  test('coerces non-string updatedAt safely (e.g. Date object)', () => {
+    const loader = createVariantLoader({
+      ...portraitMedia,
+      // Simulates call sites where updatedAt arrives as a Date instead of string
+      updatedAt: new Date('2026-04-20T10:45:30.123Z') as unknown as string,
+    })!
+
+    const url = loader({ src: '/media/pascal.jpg', width: 600 })
+    // String(Date) yields "Mon Apr 20 2026 ...", which after encodeURIComponent
+    // has its spaces and colons percent-escaped — producing a safe URL rather
+    // than a broken one.
+    expect(url).toMatch(/^\/media\/pascal-600\.jpg\?v=/)
+    expect(url).not.toContain(' ')
+    expect(url).not.toMatch(/\?v=[^&]*:/)
   })
 })

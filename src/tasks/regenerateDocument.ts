@@ -48,7 +48,7 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
       const collectionConfig =
         req.payload.collections[input.collectionSlug as keyof typeof req.payload.collections].config
 
-      const fileBuffer = await fetchFileBuffer(doc, collectionConfig)
+      const fileBuffer = await fetchFileBuffer(doc, collectionConfig, req.payload.config.serverURL)
       const safeFilename = path.basename(doc.filename)
 
       // Push the file through Payload's native pipeline. The `file` argument

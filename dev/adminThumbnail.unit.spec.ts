@@ -63,6 +63,51 @@ describe('adminThumbnail injection', () => {
     expect(fn({ doc: { filename: null } })).toBeNull()
   })
 
+  test("'auto' returns the smallest-by-width size URL when doc.sizes has multiple entries", () => {
+    const upload = runPlugin({ collections: { media: true } })
+    const fn = upload.adminThumbnail as (args: { doc: Record<string, unknown> }) => string | null
+    const doc = {
+      filename: 'photo.webp',
+      sizes: {
+        thumbnail: { url: '/api/media/file/photo-300x200.webp', width: 300 },
+        card: { url: '/api/media/file/photo-768x512.webp', width: 768 },
+        tablet: { url: '/api/media/file/photo-1024x683.webp', width: 1024 },
+      },
+    }
+    expect(fn({ doc })).toBe('/api/media/file/photo-300x200.webp')
+  })
+
+  test("'auto' falls back to parent filename URL when all doc.sizes entries have missing width or url", () => {
+    const upload = runPlugin({ collections: { media: true } })
+    const fn = upload.adminThumbnail as (args: { doc: Record<string, unknown> }) => string | null
+    const doc = {
+      filename: 'photo.webp',
+      sizes: {
+        thumbnail: { url: null, width: 300 },
+        card: { url: '/api/media/file/photo-768x512.webp', width: null },
+        tablet: null,
+        broken: undefined,
+      },
+    }
+    expect(fn({ doc })).toBe('/api/media/file/photo.webp')
+  })
+
+  test("'auto' falls back to parent filename URL when doc.sizes is missing/undefined", () => {
+    const upload = runPlugin({ collections: { media: true } })
+    const fn = upload.adminThumbnail as (args: { doc: Record<string, unknown> }) => string | null
+    expect(fn({ doc: { filename: 'photo.webp' } })).toBe('/api/media/file/photo.webp')
+    expect(fn({ doc: { filename: 'photo.webp', sizes: undefined } })).toBe(
+      '/api/media/file/photo.webp',
+    )
+  })
+
+  test("'auto' returns null when doc.filename is null AND sizes missing", () => {
+    const upload = runPlugin({ collections: { media: true } })
+    const fn = upload.adminThumbnail as (args: { doc: Record<string, unknown> }) => string | null
+    expect(fn({ doc: { filename: null } })).toBeNull()
+    expect(fn({ doc: { filename: null, sizes: undefined } })).toBeNull()
+  })
+
   test('string mode passes through to Payload as a size-name reference', () => {
     const upload = runPlugin({
       collections: { media: true },

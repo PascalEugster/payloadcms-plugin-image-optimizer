@@ -34,7 +34,7 @@ describe('metadataPolicy injection', () => {
   })
 
   test('metadataPolicy callback overrides stripMetadata and is passed through to withMetadata', () => {
-    const policy = ({ metadata }: { metadata: any; req: any }) => metadata?.format === 'jpeg'
+    const policy = ({ metadata }: { metadata: any }) => metadata?.format === 'jpeg'
 
     const upload = runPlugin({
       collections: { media: true },
@@ -44,8 +44,8 @@ describe('metadataPolicy injection', () => {
 
     expect(upload.withMetadata).toBe(policy)
     // Sanity-check: the callback behaves as documented (true keeps, false strips).
-    expect((upload.withMetadata as typeof policy)({ metadata: { format: 'jpeg' }, req: {} })).toBe(true)
-    expect((upload.withMetadata as typeof policy)({ metadata: { format: 'png' }, req: {} })).toBe(false)
+    expect((upload.withMetadata as typeof policy)({ metadata: { format: 'jpeg' } })).toBe(true)
+    expect((upload.withMetadata as typeof policy)({ metadata: { format: 'png' } })).toBe(false)
   })
 
   test('metadataPolicy works even when stripMetadata is false', () => {

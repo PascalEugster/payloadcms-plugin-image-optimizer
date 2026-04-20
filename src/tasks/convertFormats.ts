@@ -60,7 +60,7 @@ export const createConvertFormatsHandler = (resolvedConfig: ResolvedImageOptimiz
         throw new Error(`No staticDir configured for collection "${input.collectionSlug}"`)
       }
 
-      const fileBuffer = await fetchFileBuffer(doc, collectionConfig)
+      const fileBuffer = await fetchFileBuffer(doc, collectionConfig, req.payload.config.serverURL)
       const safeFilename = path.basename(doc.filename)
 
       const variants: Array<{

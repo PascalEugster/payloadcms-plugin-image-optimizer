@@ -101,8 +101,11 @@ export const imageOptimizer =
       }
 
       // adminThumbnail — when the user hasn't already set one on the collection.
-      // - 'auto' (default): function form that returns Payload's canonical file
-      //   URL from `doc.filename`, surviving the v2 parent-extension change.
+      // - 'auto' (default): function form that prefers the smallest
+      //   pre-generated size's URL from `doc.sizes` (to avoid downloading the
+      //   full parent file into a ~50px list row), falling back to Payload's
+      //   canonical file URL from `doc.filename`. Surviving the v2
+      //   parent-extension change.
       // - string / function: pass through.
       //
       // Note: Payload's `upload.staticDir` is a filesystem path, not a URL
@@ -114,6 +117,25 @@ export const imageOptimizer =
           const slug = collection.slug
           injectedUpload.adminThumbnail = ({ doc }: { doc: Record<string, unknown> }) => {
             const filename = (doc as { filename?: string | null }).filename
+            const sizes = (
+              doc as {
+                sizes?: Record<
+                  string,
+                  { url?: string | null; width?: number | null } | null | undefined
+                >
+              }
+            ).sizes
+            if (sizes) {
+              let smallest: { url: string; width: number } | null = null
+              for (const v of Object.values(sizes)) {
+                if (!v) continue
+                if (typeof v.url !== 'string' || typeof v.width !== 'number') continue
+                if (!smallest || v.width < smallest.width) {
+                  smallest = { url: v.url, width: v.width }
+                }
+              }
+              if (smallest) return smallest.url
+            }
             if (!filename) return null
             return `/api/${slug}/file/${filename}`
           }

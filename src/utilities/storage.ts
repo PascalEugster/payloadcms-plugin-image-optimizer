@@ -15,10 +15,16 @@ export function isCloudStorage(collectionConfig: { upload?: boolean | Record<str
  * Reads a file buffer from local disk or fetches it from URL.
  * Tries local disk first (when available), falls back to URL fetch.
  * This makes the plugin storage-agnostic — works with local FS and cloud storage alike.
+ *
+ * `serverURL` is used as the base when `doc.url` is relative. Callers should
+ * pass `req.payload.config.serverURL` so the plugin stays framework-agnostic.
+ * `NEXT_PUBLIC_SERVER_URL` is kept as a fallback for backwards compatibility
+ * with legacy callers that predate this parameter.
  */
 export async function fetchFileBuffer(
   doc: { filename?: string; url?: string },
   collectionConfig: { upload?: boolean | Record<string, any> },
+  serverURL?: string,
 ): Promise<Buffer> {
   const safeFilename = doc.filename ? path.basename(doc.filename) : undefined
 
@@ -36,13 +42,12 @@ export async function fetchFileBuffer(
 
   // Fetch from URL (works for cloud storage and as fallback for local)
   if (doc.url) {
-    const url = doc.url.startsWith('http')
-      ? doc.url
-      : `${process.env.NEXT_PUBLIC_SERVER_URL || ''}${doc.url}`
+    const baseURL = serverURL || process.env.NEXT_PUBLIC_SERVER_URL || ''
+    const url = doc.url.startsWith('http') ? doc.url : `${baseURL}${doc.url}`
 
     if (!url.startsWith('http')) {
       throw new Error(
-        `Cannot fetch file "${doc.filename}": URL "${doc.url}" is relative and NEXT_PUBLIC_SERVER_URL is not set`,
+        `Cannot fetch file "${doc.filename}": URL "${doc.url}" is relative and no serverURL is configured (pass payload.config.serverURL or set NEXT_PUBLIC_SERVER_URL)`,
       )
     }
 

@@ -27,12 +27,12 @@ describe('seoFilename', () => {
       originalFilename: 'IMG_1234.jpg',
       altText: 'Geländer aus Edelstahl',
     })
-    expect(result).toMatch(/^gelander-aus-edelstahl-\d{8}T\d{6}Z$/)
+    expect(result).toMatch(/^gelander-aus-edelstahl-\d{8}T\d{9}Z$/)
   })
 
   it('falls back to original stem when alt text is missing', () => {
     const result = seoFilename({ originalFilename: 'my-photo.jpg' })
-    expect(result).toMatch(/^my-photo-\d{8}T\d{6}Z$/)
+    expect(result).toMatch(/^my-photo-\d{8}T\d{9}Z$/)
   })
 
   it('reuses existing stem on re-upload', () => {
@@ -42,6 +42,43 @@ describe('seoFilename', () => {
       existingFilename: 'old-stem.webp',
     })
     expect(result).toBe('old-stem')
+  })
+
+  it('falls back to img-<hash> for Cyrillic alt text', () => {
+    const result = seoFilename({
+      originalFilename: 'IMG_1234.jpg',
+      altText: 'Мой файл',
+    })
+    expect(result).toMatch(/^img-[0-9a-f]{8}-\d{8}T\d{9}Z$/)
+  })
+
+  it('falls back to img-<hash> for Chinese alt text', () => {
+    const result = seoFilename({
+      originalFilename: 'IMG_1234.jpg',
+      altText: '我的图片',
+    })
+    expect(result).toMatch(/^img-[0-9a-f]{8}-\d{8}T\d{9}Z$/)
+  })
+
+  it('falls back to img-<hash> when both alt text and stem are non-ASCII', () => {
+    // Empty altText → uses originalFilename stem. If that also can't be
+    // slugified (e.g. pure emoji/symbols), the hash fallback still kicks in.
+    const result = seoFilename({ originalFilename: '!@#.jpg', altText: '' })
+    expect(result).toMatch(/^img-[0-9a-f]{8}-\d{8}T\d{9}Z$/)
+  })
+
+  it('uses millisecond precision — two calls ≥1ms apart in the same second differ', async () => {
+    // The prior bug: seoFilename stripped ms, so two uploads within the same
+    // second produced identical filenames and collided on cloud storage. With
+    // ms retained, any two calls >=1ms apart are distinct. (Real HTTP uploads
+    // are always orders of magnitude farther apart than that.)
+    const a = seoFilename({ originalFilename: 'x.jpg', altText: 'same alt' })
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    const b = seoFilename({ originalFilename: 'x.jpg', altText: 'same alt' })
+    expect(a).not.toBe(b)
+    // Both should have 9-digit time parts (HHMMSSmmm) — confirming ms are kept.
+    expect(a).toMatch(/^same-alt-\d{8}T\d{9}Z$/)
+    expect(b).toMatch(/^same-alt-\d{8}T\d{9}Z$/)
   })
 })
 
@@ -56,16 +93,16 @@ describe('timestampFilename', () => {
     expect(result).toMatch(/^gelander-foto-\d{8}T\d{9}Z$/)
   })
 
-  it('uses millisecond precision (distinct from seoFilename)', () => {
+  it('uses millisecond precision (same ms resolution as seoFilename)', () => {
     const seo = seoFilename({ originalFilename: 'x.jpg', altText: 'test' })
     const ts = timestampFilename({ originalFilename: 'x.jpg' })
-    // seoFilename strips ms → 15 chars after `T` minus `Z` = 14 digits => dateT + 6 time digits + Z
-    // timestampFilename keeps ms → 9 digits (HHMMSSmmm)
-    const seoTimePart = seo.match(/(\d{8}T\d+)Z$/)?.[1]
-    const tsTimePart = ts.match(/(\d{8}T\d+)Z$/)?.[1]
+    // Both strategies now keep ms → 9 digits (HHMMSSmmm) after the `T`.
+    const seoTimePart = seo.match(/T(\d+)Z$/)?.[1]
+    const tsTimePart = ts.match(/T(\d+)Z$/)?.[1]
     expect(seoTimePart).toBeDefined()
     expect(tsTimePart).toBeDefined()
-    expect(tsTimePart!.length).toBeGreaterThan(seoTimePart!.length)
+    expect(seoTimePart!.length).toBe(9)
+    expect(tsTimePart!.length).toBe(9)
   })
 
   it('ignores missing alt text (uses stem only)', () => {

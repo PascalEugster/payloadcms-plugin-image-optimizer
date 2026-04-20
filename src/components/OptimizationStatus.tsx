@@ -193,16 +193,6 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
     }
   }, [collectionSlug, id, regenerating])
 
-  if (!status) {
-    return (
-      <div style={{ padding: '12px 0' }}>
-        <div style={{ color: '#6b7280', fontSize: '13px' }}>
-          No optimization data yet. Upload an image to optimize.
-        </div>
-      </div>
-    )
-  }
-
   const savings =
     originalSize && optimizedSize
       ? Math.round((1 - optimizedSize / originalSize) * 100)
@@ -210,22 +200,28 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
 
   return (
     <div style={{ padding: '12px 0' }}>
-      <div style={{ marginBottom: '8px' }}>
-        <span
-          style={{
-            backgroundColor: statusColors[status] || '#6b7280',
-            borderRadius: '4px',
-            color: '#fff',
-            display: 'inline-block',
-            fontSize: '12px',
-            fontWeight: 600,
-            padding: '2px 8px',
-            textTransform: 'uppercase',
-          }}
-        >
-          {status}
-        </span>
-      </div>
+      {status ? (
+        <div style={{ marginBottom: '8px' }}>
+          <span
+            style={{
+              backgroundColor: statusColors[status] || '#6b7280',
+              borderRadius: '4px',
+              color: '#fff',
+              display: 'inline-block',
+              fontSize: '12px',
+              fontWeight: 600,
+              padding: '2px 8px',
+              textTransform: 'uppercase',
+            }}
+          >
+            {status}
+          </span>
+        </div>
+      ) : (
+        <div style={{ color: '#6b7280', fontSize: '13px', marginBottom: '8px' }}>
+          No optimization data yet. Click below to optimize.
+        </div>
+      )}
 
       {error && (
         <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '8px' }}>{error}</div>
@@ -284,7 +280,9 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
               cursor: regenerating ? 'wait' : 'pointer',
             }}
           >
-            {regenerating ? 'Regenerating…' : 'Regenerate this image'}
+            {regenerating
+              ? (status ? 'Regenerating…' : 'Optimizing…')
+              : (status ? 'Regenerate this image' : 'Optimize this image')}
           </button>
           {regenError && (
             <span style={{ color: '#ef4444', fontSize: '12px' }}>{regenError}</span>

@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.2.0 — Lifecycle audit fixes
+
+A maintenance release from an end-to-end audit of the upload → save → read lifecycle. Seven fixes land together — each disjoint, unit-covered, and verified against the dev admin. One minor type tightening is technically breaking but runtime-identical.
+
+### Fixed
+
+- **`seoFilename` no longer collapses non-Latin alt text to `media-*`.** `stripDiacritics` only removes combining marks; Cyrillic / CJK / Arabic / Greek characters were wiped by the subsequent ASCII-only regex, producing collision-prone fallback filenames. When the kebab-cased slug would be empty, the strategy now appends an 8-char SHA-256 hash — `img-a3f7b2c1-20260420T104530123Z.webp` — so non-Latin inputs still get unique, recognizable filenames. No new dependencies.
+
+- **`seoFilename` timestamp now keeps milliseconds.** Previously had 1-second resolution; two uploads in the same second with the same alt text produced identical filenames. Matches `timestampFilename`'s `YYYYMMDDTHHMMSSmmmZ` format.
+
+- **Multi-format variants regenerate on focal-point changes.** When a user adjusted focal point or crop, Payload's native re-upload refreshed the parent WebP and all `sizes`, but the additive AVIF/secondary-format variants kept pointing at buffers produced from the pre-change crop. The `convertFormats` job now re-runs on native re-uploads in multi-format collections, reading the freshly-written parent so variants match the new crop.
+
+- **`adminThumbnail: 'auto'` no longer downloads full-size originals in list views.** It now picks the smallest-by-width entry from `doc.sizes`, falling back to `/api/{slug}/file/{filename}` only when no size has a valid URL. A 50-row list that previously pulled 50 × 2560-wide WebPs now pulls 50 × thumbnail-size files.
+
+- **Responsive-image cache-bust URLs are now URL-safe.** `createVariantLoader` was appending the raw ISO timestamp as `?2026-04-20T10:45:30.123Z` — browsers tolerate it, some CDNs and proxies don't. Now emits `?v={encoded}`; when the variant URL already contains `?` (e.g. signed CDN URL) the separator flips to `&`.
+
+- **`fetchFileBuffer` accepts an explicit `serverURL` parameter.** The internal helper previously relied on `NEXT_PUBLIC_SERVER_URL` (a Next.js-only env convention) to build absolute URLs from relative `doc.url`. It now takes the server URL as an argument; both tasks (`convertFormats`, `regenerateDocument`) thread `req.payload.config.serverURL` through. `NEXT_PUBLIC_SERVER_URL` is kept as a last-resort fallback for backwards compatibility.
+
+- **Client-side Canvas resize preserves alpha.** WebP / BMP / TIFF uploads with transparency were silently flattened to JPEG. A sparse RGBA scan after draw now detects alpha; when present the output is PNG (correctness over size). JPEGs skip the scan. Tainted canvases fall back to PNG too.
+
+- **Upload guards for zero-byte, SVG, and animated GIF.** SVG uploads now save with `imageOptimizer.status = 'complete'` instead of being rasterized to blurry WebP. Animated GIFs (detected via `sharp().metadata().pages > 1`) get the same treatment — no silent flattening to a single-frame WebP. Zero-byte buffers return without touching anything (Payload's upstream check already rejects them with a FileUploadError).
+
+### Breaking (type-level only)
+
+- **`MetadataPolicy` signature no longer declares `req`.** Payload's `withMetadata` callback never actually passed `req` — it was always `undefined` at runtime. The type is now `(args: { metadata: any }) => boolean | Promise<boolean>`. Destructuring `req` from the argument will now emit a TS error, but the runtime value was already `undefined`, so the behavior on that field is unchanged.
+
+### Other
+
+- `OptimizationStatus` edit-page panel now shows "Optimize this image" (instead of an empty placeholder) when no optimization record exists yet, so legacy docs without `imageOptimizer` can be kicked into the pipeline from the edit view.
+
+---
+
 ## 2.1.2 — New `timestampFilename` strategy
 
 Additive, non-breaking. Adds a third built-in filename strategy for users who want to keep the original filename but need collision-free uniqueness without UUID noise or alt-text dependency.

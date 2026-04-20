@@ -231,6 +231,105 @@ describe('Image Optimizer Plugin', () => {
     expect(avifExists).toBe(true)
   })
 
+  test('should regenerate additive variants after focal-point change (native reupload)', async () => {
+    // Regression harness for the staleness bug: when Payload's shouldReupload()
+    // re-runs its pipeline after a focal-point change, the parent + sizes get
+    // regenerated with the new crop, but additive variants (e.g. AVIF sibling)
+    // previously stayed stamped from the pre-change crop because afterChange
+    // short-circuited on `imageOptimizer_nativeReupload`.
+    const buffer = await createTestImage(400, 300)
+
+    const doc = await payload.create({
+      collection: 'media',
+      data: {},
+      file: {
+        data: buffer,
+        mimetype: 'image/jpeg',
+        name: 'test-focal-reupload.jpg',
+        size: buffer.length,
+      },
+    })
+
+    await payload.jobs.run()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const initialDoc = await payload.findByID({ collection: 'media', id: doc.id })
+    expect(initialDoc.imageOptimizer.status).toBe('complete')
+    const initialVariants = initialDoc.imageOptimizer.variants as Array<{
+      filename: string
+      format: string
+    }>
+    const initialAvif = initialVariants.find((v) => v.format === 'avif')
+    expect(initialAvif).toBeDefined()
+
+    const mediaDir = path.resolve(dirname, 'media')
+    const variantPath = path.join(mediaDir, initialAvif!.filename)
+    const initialStat = await fs.stat(variantPath)
+
+    // Ensure measurable mtime delta on coarse filesystems.
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+
+    // Update focalX/focalY to trigger Payload's shouldReupload() path.
+    //
+    // Payload's reupload logic is finicky in the local-API context:
+    //   1. `generateFileData` only re-fetches the stored file when
+    //      `shouldReupload(uploadEdits, data)` returns true AND the incoming
+    //      `data` carries the doc's current filename/url (used as the source
+    //      of the re-fetched bytes).
+    //   2. `shouldReupload` compares `uploadEdits.focalPoint` against
+    //      `data.focalX/Y`. When they agree, no reupload fires.
+    //   3. The browser admin UI achieves asymmetric values by sending the NEW
+    //      focal in `?uploadEdits=...` while the body still carries the OLD
+    //      `focalX/Y` from `originalDoc` — a legitimate reupload signal.
+    //
+    // Mirroring (3) here: we pass the NEW focal via `req.query.uploadEdits`
+    // but keep `data.focalX/Y` at their stored (50, 50) values.
+    await payload.update({
+      collection: 'media',
+      id: doc.id,
+      data: {
+        filename: initialDoc.filename,
+        url: initialDoc.url,
+        focalX: (initialDoc as any).focalX ?? 50,
+        focalY: (initialDoc as any).focalY ?? 50,
+      } as any,
+      req: {
+        query: { uploadEdits: { focalPoint: { x: 25, y: 75 } } },
+      } as any,
+    })
+
+    // Allow the queued convertFormats job + waitUntil promise to complete.
+    await payload.jobs.run()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const updatedDoc = await payload.findByID({ collection: 'media', id: doc.id })
+
+    // Status cycled through pending → complete again, meaning convertFormats
+    // was re-invoked after the focal-point change.
+    expect(updatedDoc.imageOptimizer.status).toBe('complete')
+
+    const updatedVariants = updatedDoc.imageOptimizer.variants as Array<{
+      filename: string
+      format: string
+    }>
+    const updatedAvif = updatedVariants.find((v) => v.format === 'avif')
+    expect(updatedAvif).toBeDefined()
+    // Filename stems off doc.filename (same across updates), so the same
+    // variant path is rewritten rather than orphaned.
+    expect(updatedAvif!.filename).toBe(initialAvif!.filename)
+
+    // The variant was rewritten: mtime advanced relative to the pre-change
+    // snapshot. This is the cheapest signal available in the local harness
+    // — full pixel comparison would require a non-constant source image.
+    const updatedStat = await fs.stat(variantPath)
+    expect(updatedStat.mtimeMs).toBeGreaterThan(initialStat.mtimeMs)
+
+    // Sanity: the focal point on the parent doc really did change, confirming
+    // the reupload path was taken.
+    expect(updatedDoc.focalX).toBe(25)
+    expect(updatedDoc.focalY).toBe(75)
+  })
+
   test('avatars collection should use custom maxDimensions', async () => {
     const buffer = await createTestImage(800, 600)
 
@@ -312,6 +411,77 @@ describe('Image Optimizer Plugin', () => {
 
     const formats = updatedDoc.imageOptimizer.variants.map((v: any) => v.format)
     expect(formats).toContain('avif')
+  })
+
+  test('should accept SVG upload without crashing and mark status complete with no conversion', async () => {
+    // Inline 1×1 SVG — sharp would rasterize this and webp-convert it if we
+    // didn't guard against image/svg+xml in beforeChange. We expect the
+    // original buffer preserved and imageOptimizer.status === 'complete'.
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="red"/></svg>'
+    const buffer = Buffer.from(svg, 'utf8')
+
+    let doc: any
+    try {
+      doc = await payload.create({
+        collection: 'media',
+        data: {},
+        file: {
+          data: buffer,
+          mimetype: 'image/svg+xml',
+          name: 'test-vector.svg',
+          size: buffer.length,
+        },
+      })
+    } catch (err) {
+      // If Payload's generateFileData rejects SVG outright (upstream of our
+      // hook), surface the failure mode rather than silently pass — the fix
+      // may need to extend into collection-config injection to skip
+      // formatOptions for SVG uploads.
+      throw new Error(
+        `SVG upload failed before our guard could run — Payload's generateFileData ` +
+          `rejected it. Message: ${(err as Error).message}`,
+      )
+    }
+
+    expect(doc.imageOptimizer).toBeDefined()
+    expect(doc.imageOptimizer.status).toBe('complete')
+    expect(doc.imageOptimizer.originalSize).toBe(doc.imageOptimizer.optimizedSize)
+    expect(doc.imageOptimizer.variants).toEqual([])
+  })
+
+  test('should handle zero-byte buffer without crashing the plugin', async () => {
+    // Zero-byte buffer with an image mimetype passes the mimetype guard. Our
+    // length === 0 early-return lets Payload handle it at its own layer.
+    // Whether Payload accepts or rejects it is Payload's decision; we just
+    // ensure the plugin itself does not crash.
+    const buffer = Buffer.alloc(0)
+
+    let crashed = false
+    let doc: any = null
+    try {
+      doc = await payload.create({
+        collection: 'media',
+        data: {},
+        file: {
+          data: buffer,
+          mimetype: 'image/jpeg',
+          name: 'test-zero-byte.jpg',
+          size: 0,
+        },
+      })
+    } catch (err) {
+      // Payload may reject this — that's acceptable. What's NOT acceptable is
+      // our plugin crashing with a sharp decode error from the plugin layer.
+      const msg = (err as Error).message ?? String(err)
+      expect(msg).not.toMatch(/Input buffer contains unsupported image format/i)
+      crashed = true
+    }
+
+    if (!crashed && doc) {
+      // If Payload accepted the doc, our imageOptimizer field should NOT be
+      // present (we returned data untouched for the zero-byte case).
+      expect(doc.imageOptimizer?.status).toBeUndefined()
+    }
   })
 
   test('should not process non-image uploads', async () => {

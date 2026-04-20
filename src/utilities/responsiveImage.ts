@@ -106,13 +106,19 @@ export function createVariantLoader(media: MediaResource): ImageLoader | undefin
   const variants = getValidVariants(media)
   if (variants.length === 0) return undefined
 
-  const cacheBust = media.updatedAt ? `?${media.updatedAt}` : ''
+  const encodedCacheBust = media.updatedAt
+    ? `v=${encodeURIComponent(String(media.updatedAt))}`
+    : ''
 
   return ({ src, width, quality }) => {
     const match = findBestVariant(variants, width)
 
     if (match) {
-      return `${match.url}${cacheBust}`
+      if (!encodedCacheBust) return match.url
+      // If the pre-generated variant URL already has a query string
+      // (e.g. a signed CDN URL), append with `&` instead of `?`.
+      const separator = match.url.includes('?') ? '&' : '?'
+      return `${match.url}${separator}${encodedCacheBust}`
     }
 
     // Fall back to next/image optimization for unmatched widths

@@ -1,4 +1,5 @@
 import path from 'path'
+import sharp from 'sharp'
 import type { CollectionBeforeChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
@@ -30,6 +31,51 @@ export const createBeforeChangeHook = (
     if (context?.imageOptimizer_skip) return data
 
     if (!req.file || !req.file.data || !req.file.mimetype?.startsWith('image/')) return data
+
+    // Guard: zero-byte buffer. Sharp throws on decode; let Payload handle the
+    // empty file at its own layer rather than corrupting a bogus status record.
+    if (req.file.data.length === 0) return data
+
+    // Guard: SVG. Sharp rasterizes vectors — format conversion to webp/avif
+    // produces a blurry raster, not a vector. Skip plugin optimization while
+    // still letting Payload persist the original file untouched.
+    if (req.file.mimetype === 'image/svg+xml') {
+      data.imageOptimizer = {
+        originalSize: req.file.data.length,
+        optimizedSize: req.file.data.length,
+        status: 'complete',
+        variants: [],
+        error: null,
+      }
+      context.imageOptimizer_hasUpload = true
+      context.imageOptimizer_statusResolved = true
+      return data
+    }
+
+    // Guard: animated GIF. Sharp's toFormat('webp') drops frames silently (keeps
+    // only the first) — data loss. Static GIFs (single page) fall through to
+    // normal processing. `pages: -1` asks sharp to read all pages so the
+    // metadata reports the true frame count.
+    if (req.file.mimetype === 'image/gif') {
+      try {
+        const metadata = await sharp(req.file.data, { pages: -1 }).metadata()
+        if (typeof metadata.pages === 'number' && metadata.pages > 1) {
+          data.imageOptimizer = {
+            originalSize: req.file.data.length,
+            optimizedSize: req.file.data.length,
+            status: 'complete',
+            variants: [],
+            error: null,
+          }
+          context.imageOptimizer_hasUpload = true
+          context.imageOptimizer_statusResolved = true
+          return data
+        }
+      } catch {
+        // If sharp can't parse the GIF at all, fall through so Payload's
+        // generateFileData surfaces the real error rather than masking it.
+      }
+    }
 
     // Detect re-upload triggered by Payload's shouldReupload() — focal point or crop change.
     // shouldReupload re-fetches the stored (already-optimized) file and sets req.file.

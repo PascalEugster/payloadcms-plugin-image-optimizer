@@ -28,6 +28,34 @@ export type ResizeOptions = {
   jpegQuality?: number
 }
 
+/**
+ * Sparse scan of the canvas to detect any transparent pixel. We sample the
+ * alpha byte of every 8th pixel — ~1.5% of a 2048-wide image — which is
+ * enough to catch any non-trivial alpha region. Cheaper than reading the
+ * full buffer, but still correct for real-world images with transparency.
+ *
+ * If `getImageData` throws (tainted canvas, cross-origin), we bail to the
+ * safe default and assume alpha is present — PNG preserves fidelity even
+ * if the source was opaque, whereas JPEG would silently flatten it.
+ */
+function hasAlpha(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+): boolean {
+  try {
+    const img = ctx.getImageData(0, 0, width, height)
+    const { data } = img
+    // data is RGBA quads; stride 4 * 8 = 32 to skip 8 pixels at a time.
+    for (let i = 3; i < data.length; i += 32) {
+      if (data[i]! < 255) return true
+    }
+    return false
+  } catch {
+    return true
+  }
+}
+
 export async function resizeImage(
   file: File,
   options: ResizeOptions = {},
@@ -69,8 +97,21 @@ export async function resizeImage(
   ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight)
   bitmap.close()
 
-  // Keep PNG for transparency; convert everything else to JPEG.
-  const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+  // Pick output format based on whether the source can carry alpha AND
+  // actually uses it. JPEG cannot encode transparency, so any image with
+  // alpha < 255 pixels would be silently composited over black/white and
+  // data would be lost. For formats that cannot carry alpha (JPEG), skip
+  // the scan entirely — it's always opaque.
+  const sourceCouldHaveAlpha =
+    file.type === 'image/png' ||
+    file.type === 'image/webp' ||
+    file.type === 'image/bmp' ||
+    file.type === 'image/tiff'
+  const sourceHasAlpha = sourceCouldHaveAlpha
+    ? hasAlpha(ctx, targetWidth, targetHeight)
+    : false
+
+  const outputType = sourceHasAlpha ? 'image/png' : 'image/jpeg'
   const quality = outputType === 'image/jpeg' ? jpegQuality : undefined
   const ext = outputType === 'image/png' ? 'png' : 'jpg'
 

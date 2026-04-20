@@ -62,7 +62,7 @@ export type ResolvedRegenerateButtonConfig = {
  * Non-override rule: if the collection already has `upload.withMetadata`, the
  * plugin leaves it untouched.
  */
-export type MetadataPolicy = (args: { metadata: any; req: any }) => boolean | Promise<boolean>
+export type MetadataPolicy = (args: { metadata: any }) => boolean | Promise<boolean>
 
 /**
  * Response header policy applied to file responses for targeted collections.

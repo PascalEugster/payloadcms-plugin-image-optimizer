@@ -10,7 +10,10 @@ type CreateImageBitmap = (input: Blob) => Promise<ImageBitmap>
 
 type CanvasToBlob = (cb: (b: Blob | null) => void, type?: string, quality?: number) => void
 
-type CanvasContext2D = { drawImage: (...args: unknown[]) => void }
+type CanvasContext2D = {
+  drawImage: (...args: unknown[]) => void
+  getImageData: (x: number, y: number, w: number, h: number) => { data: Uint8ClampedArray }
+}
 
 type StubCanvas = {
   width: number
@@ -22,12 +25,52 @@ type StubCanvas = {
 const originalCreateImageBitmap = (globalThis as any).createImageBitmap
 const originalDocument = (globalThis as any).document
 
+type AlphaMode =
+  | 'opaque' // every pixel fully opaque (alpha = 255)
+  | 'transparent' // at least one pixel has alpha < 255
+  | 'throws' // getImageData throws (tainted canvas / cross-origin)
+
 type Stubs = {
   bitmapWidth: number
   bitmapHeight: number
   bitmapThrows?: boolean
   blob?: Blob | null
   noContext?: boolean
+  /**
+   * Controls what `ctx.getImageData` returns for the alpha scan. Only
+   * consulted for file types that could carry alpha (PNG/WebP/BMP/TIFF).
+   * Defaults to 'opaque' so existing JPEG-path tests stay unaffected.
+   */
+  alpha?: AlphaMode
+  /** Captures the MIME type passed to canvas.toBlob, for assertions. */
+  onToBlob?: (type?: string, quality?: number) => void
+}
+
+const buildGetImageData = (
+  mode: AlphaMode,
+): ((x: number, y: number, w: number, h: number) => { data: Uint8ClampedArray }) => {
+  return (_x, _y, w, h) => {
+    if (mode === 'throws') {
+      throw new DOMException('tainted canvas', 'SecurityError')
+    }
+    // Use a small fixed buffer — hasAlpha iterates with stride 32 so any
+    // buffer larger than 4 bytes exercises the loop. Keep it small to avoid
+    // allocating megabytes of typed array per test.
+    const pixelCount = Math.max(32, Math.min(256, w * h))
+    const data = new Uint8ClampedArray(pixelCount * 4)
+    for (let i = 0; i < pixelCount; i++) {
+      data[i * 4 + 0] = 0
+      data[i * 4 + 1] = 0
+      data[i * 4 + 2] = 0
+      data[i * 4 + 3] = 255 // fully opaque by default
+    }
+    if (mode === 'transparent') {
+      // Place a transparent pixel at index 0 — the scan starts at byte 3
+      // (alpha of pixel 0) so this is guaranteed to be hit.
+      data[3] = 0
+    }
+    return { data }
+  }
 }
 
 const installStubs = (stubs: Stubs) => {
@@ -43,11 +86,19 @@ const installStubs = (stubs: Stubs) => {
   }
   ;(globalThis as any).createImageBitmap = createImageBitmapStub
 
+  const ctx: CanvasContext2D = {
+    drawImage: () => {},
+    getImageData: buildGetImageData(stubs.alpha ?? 'opaque'),
+  }
+
   const canvas: StubCanvas = {
     width: 0,
     height: 0,
-    getContext: () => (stubs.noContext ? null : { drawImage: () => {} }),
-    toBlob: (cb) => cb(stubs.blob ?? null),
+    getContext: () => (stubs.noContext ? null : ctx),
+    toBlob: (cb, type, quality) => {
+      stubs.onToBlob?.(type, quality)
+      cb(stubs.blob ?? null)
+    },
   }
   ;(globalThis as any).document = {
     createElement: (tag: string) => {
@@ -128,12 +179,106 @@ describe('resizeImage', () => {
     expect(result.size).toBeGreaterThan(0)
   })
 
-  test('keeps PNG extension for PNG inputs (transparency preserved)', async () => {
+  test('keeps PNG extension for opaque PNG inputs (preserves format even without alpha)', async () => {
     const fakeBlob = new Blob(['resized-bytes'], { type: 'image/png' })
-    installStubs({ bitmapWidth: 4000, bitmapHeight: 3000, blob: fakeBlob })
+    let seenType: string | undefined
+    installStubs({
+      bitmapWidth: 4000,
+      bitmapHeight: 3000,
+      blob: fakeBlob,
+      alpha: 'opaque',
+      onToBlob: (type) => {
+        seenType = type
+      },
+    })
     const file = new File(['oversized'], 'logo.PNG', { type: 'image/png' })
     const result = await resizeImage(file)
-    expect(result.name).toBe('logo.png')
+    // Opaque PNG has no alpha → logic picks JPEG output (smaller file, same
+    // visual fidelity). This is the intended behavior of the alpha-aware
+    // encoder selection. If an opaque PNG later needs to stay PNG, it would
+    // belong to a different concern (format preservation), not alpha safety.
+    expect(seenType).toBe('image/jpeg')
+    expect(result.name).toBe('logo.jpg')
+    expect(result.type).toBe('image/jpeg')
+  })
+
+  test('WebP with alpha outputs PNG to preserve transparency', async () => {
+    const fakeBlob = new Blob(['resized-bytes'], { type: 'image/png' })
+    let seenType: string | undefined
+    installStubs({
+      bitmapWidth: 4000,
+      bitmapHeight: 3000,
+      blob: fakeBlob,
+      alpha: 'transparent',
+      onToBlob: (type) => {
+        seenType = type
+      },
+    })
+    const file = new File(['oversized'], 'sticker.webp', { type: 'image/webp' })
+    const result = await resizeImage(file)
+    expect(seenType).toBe('image/png')
+    expect(result.name).toBe('sticker.png')
+    expect(result.type).toBe('image/png')
+  })
+
+  test('WebP without alpha outputs JPEG', async () => {
+    const fakeBlob = new Blob(['resized-bytes'], { type: 'image/jpeg' })
+    let seenType: string | undefined
+    installStubs({
+      bitmapWidth: 4000,
+      bitmapHeight: 3000,
+      blob: fakeBlob,
+      alpha: 'opaque',
+      onToBlob: (type) => {
+        seenType = type
+      },
+    })
+    const file = new File(['oversized'], 'photo.webp', { type: 'image/webp' })
+    const result = await resizeImage(file)
+    expect(seenType).toBe('image/jpeg')
+    expect(result.name).toBe('photo.jpg')
+    expect(result.type).toBe('image/jpeg')
+  })
+
+  test('JPEG skips the alpha scan (fast path)', async () => {
+    const fakeBlob = new Blob(['resized-bytes'], { type: 'image/jpeg' })
+    const getImageDataSpy = vi.fn(buildGetImageData('opaque'))
+    installStubs({ bitmapWidth: 4000, bitmapHeight: 3000, blob: fakeBlob })
+    // Overwrite the ctx's getImageData with a spy so we can assert it's
+    // never called on the JPEG path.
+    const doc = (globalThis as any).document as { createElement: (t: string) => StubCanvas }
+    const canvas = doc.createElement('canvas')
+    const ctx = canvas.getContext('2d') as CanvasContext2D
+    ctx.getImageData = getImageDataSpy
+    // Reinstall document so subsequent createElement returns the same canvas.
+    ;(globalThis as any).document = {
+      createElement: (tag: string) => {
+        if (tag === 'canvas') return canvas
+        throw new Error(`unexpected createElement('${tag}')`)
+      },
+    }
+    const file = new File(['oversized'], 'photo.jpg', { type: 'image/jpeg' })
+    await resizeImage(file)
+    expect(getImageDataSpy).not.toHaveBeenCalled()
+  })
+
+  test('tainted-canvas SecurityError on getImageData falls back to PNG output', async () => {
+    const fakeBlob = new Blob(['resized-bytes'], { type: 'image/png' })
+    let seenType: string | undefined
+    installStubs({
+      bitmapWidth: 4000,
+      bitmapHeight: 3000,
+      blob: fakeBlob,
+      alpha: 'throws',
+      onToBlob: (type) => {
+        seenType = type
+      },
+    })
+    const file = new File(['oversized'], 'xorigin.webp', { type: 'image/webp' })
+    const result = await resizeImage(file)
+    // Safe default: assume alpha present → PNG output, no silent flattening.
+    expect(seenType).toBe('image/png')
+    expect(result.name).toBe('xorigin.png')
     expect(result.type).toBe('image/png')
   })
 })
