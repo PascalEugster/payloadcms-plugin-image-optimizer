@@ -44,6 +44,7 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
   regenerateButton: resolveRegenerateButton(config.regenerateButton),
   replaceOriginal: config.replaceOriginal ?? true,
+  responseHeaders: config.responseHeaders ?? false,
   stripMetadata: config.stripMetadata ?? true,
 })
 

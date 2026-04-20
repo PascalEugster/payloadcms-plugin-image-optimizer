@@ -53,6 +53,26 @@ export type ResolvedRegenerateButtonConfig = {
 }
 
 /**
+ * Response header policy applied to file responses for targeted collections.
+ *
+ * - `false` (default) — do nothing.
+ * - `'immutable'` — inject a `modifyResponseHeaders` that sets
+ *   `Cache-Control: public, max-age=31536000, immutable`. Only safe when
+ *   filenames are content-stable (`generateFilename` is set, e.g. `uuidFilename`
+ *   or `seoFilename`). Otherwise the plugin emits a `payload.logger.warn` at
+ *   init explaining the risk of stale cached files when filenames are reused.
+ * - function — passed through to Payload as-is. Receives a `{ doc }` arg
+ *   alongside `headers` (for richer per-doc decisions if Payload supplies it).
+ *
+ * Non-override rule: if the collection already has `upload.modifyResponseHeaders`,
+ * the plugin leaves it untouched.
+ */
+export type ResponseHeadersOption =
+  | false
+  | 'immutable'
+  | ((headers: Headers, args: { doc: unknown }) => Headers | void)
+
+/**
  * `adminThumbnail` strategy injected on each targeted collection.
  *
  * - `'auto'` (default) — inject a function form that returns a URL derived from
@@ -117,6 +137,15 @@ export type ImageOptimizerConfig = {
    */
   regenerateButton?: boolean | RegenerateButtonConfig
   replaceOriginal?: boolean
+  /** Opt-in response header policy for file responses on targeted collections.
+   *
+   * - `false` (default) — do nothing.
+   * - `'immutable'` — inject `Cache-Control: public, max-age=31536000, immutable`.
+   *   Only safe when `generateFilename` is set; otherwise the plugin warns at init.
+   * - function — pass through as-is.
+   *
+   * Non-override: respects an existing `upload.modifyResponseHeaders`. */
+  responseHeaders?: ResponseHeadersOption
   stripMetadata?: boolean
   /** Replace original filenames with UUIDs (e.g., `photo.jpg` → `a1b2c3d4.webp`).
    * Prevents Vercel Blob "already exists" errors and avoids leaking original filenames.
@@ -143,6 +172,8 @@ export type ResolvedImageOptimizerConfig = Required<
   generateFilename?: GenerateFilename
   regenerateButton: ResolvedRegenerateButtonConfig
   replaceOriginal: boolean
+  /** Resolved response-header policy. Defaults to `false`. */
+  responseHeaders: ResponseHeadersOption
 }
 
 export type ImageOptimizerData = {

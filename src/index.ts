@@ -119,6 +119,43 @@ export const imageOptimizer =
         }
       }
 
+      // responseHeaders — opt-in cache header policy for file responses.
+      if (userUpload.modifyResponseHeaders === undefined) {
+        const opt = resolvedConfig.responseHeaders
+        if (opt === 'immutable') {
+          // Long-lived immutable caching is only safe when filenames are stable
+          // (UUID / content-hashed). Without `generateFilename`, a re-uploaded
+          // file under the same name would be served stale by intermediaries
+          // for up to a year. Warn loudly at init rather than silently shipping
+          // a footgun.
+          if (!resolvedConfig.generateFilename) {
+            const logger = (config as unknown as {
+              logger?: { warn?: (msg: string) => void }
+            }).logger
+            const msg =
+              `[image-optimizer] responseHeaders: 'immutable' is enabled on collection "${collection.slug}" ` +
+              `without a custom generateFilename. Re-uploads under the same filename will be cached as ` +
+              `immutable for 1 year and served stale. Use generateFilename: uuidFilename (or seoFilename) ` +
+              `to make filenames content-stable.`
+            if (logger?.warn) {
+              logger.warn(msg)
+            } else {
+              // eslint-disable-next-line no-console
+              console.warn(msg)
+            }
+          }
+          injectedUpload.modifyResponseHeaders = ({ headers }: { headers: Headers }) => {
+            headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+            return headers
+          }
+        } else if (typeof opt === 'function') {
+          // Pass-through: adapt our (headers, args) signature to Payload's ({ headers })
+          // shape. Payload doesn't currently pass `doc`, so we emit a placeholder.
+          injectedUpload.modifyResponseHeaders = ({ headers }: { headers: Headers }) =>
+            opt(headers, { doc: undefined }) ?? headers
+        }
+      }
+
       // Per-size format conversion — inject formatOptions on each imageSize that
       // doesn't already have one. Payload's createImageSizes derives the size
       // filename extension from the produced buffer's MIME type, so injecting
