@@ -7,7 +7,6 @@ import { translations } from './translations/index.js'
 import { getImageOptimizerField } from './fields/imageOptimizerField.js'
 import { createBeforeChangeHook } from './hooks/beforeChange.js'
 import { createBeforeOperationHook } from './hooks/beforeOperation.js'
-import { createAfterChangeHook } from './hooks/afterChange.js'
 import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js'
 import { createRegenerateHandler, createRegenerateStatusHandler, createCancelHandler } from './endpoints/regenerate.js'
 
@@ -221,10 +220,6 @@ export const imageOptimizer =
           beforeChange: [
             ...(collection.hooks?.beforeChange || []),
             createBeforeChangeHook(resolvedConfig, collection.slug),
-          ],
-          afterChange: [
-            ...(collection.hooks?.afterChange || []),
-            createAfterChangeHook(resolvedConfig, collection.slug),
           ],
         },
         admin: {
