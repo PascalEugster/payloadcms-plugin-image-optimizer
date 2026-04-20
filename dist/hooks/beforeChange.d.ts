@@ -1,7 +1,7 @@
 import type { CollectionBeforeChangeHook } from 'payload';
 import type { ResolvedImageOptimizerConfig } from '../types.js';
 /**
- * v2 — Config-injection architecture.
+ * Config-injection architecture.
  *
  * Payload's native `generateFileData()` pipeline (driven by
  * `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and
@@ -15,6 +15,8 @@ import type { ResolvedImageOptimizerConfig } from '../types.js';
  *   • the early-bail when Payload is re-fetching its own file for a focal-point
  *     adjustment (no need to re-stamp anything)
  *   • the imageOptimizer status field (originalSize, optimizedSize, status,
- *     thumbHash) and decision of whether an additive multi-format job is needed
+ *     thumbHash)
+ *
+ * Status is always `complete` after this hook runs — no async handoff.
  */
 export declare const createBeforeChangeHook: (resolvedConfig: ResolvedImageOptimizerConfig, collectionSlug: string) => CollectionBeforeChangeHook;

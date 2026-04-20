@@ -16,8 +16,6 @@ const formatBytes = (bytes)=>{
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 };
 const statusColors = {
-    pending: '#f59e0b',
-    processing: '#3b82f6',
     complete: '#10b981',
     error: '#ef4444'
 };
@@ -38,21 +36,11 @@ export const OptimizationStatus = (props)=>{
     // the doc has been re-written (status stays 'complete' throughout, so we
     // can't rely on a status transition to signal completion).
     const regenerateStartRef = React.useRef(null);
-    // Reset polled data when a new upload changes the form status back to pending
+    // Poll for status updates only while a regeneration we initiated is in
+    // flight. beforeChange now always resolves status to 'complete' or 'error'
+    // synchronously, so there's no "non-terminal" state to poll for on upload.
     React.useEffect(()=>{
-        if (formStatus === 'pending') {
-            setPolledData(null);
-        }
-    }, [
-        formStatus
-    ]);
-    // Poll for status updates when status is non-terminal OR a regeneration
-    // we initiated is still in flight.
-    React.useEffect(()=>{
-        const currentStatus = polledData?.status ?? formStatus;
-        const terminal = currentStatus === 'complete' || currentStatus === 'error';
-        if (terminal && !regenerating) return;
-        if (!currentStatus && !regenerating) return;
+        if (!regenerating) return;
         if (!collectionSlug || !id) return;
         const controller = new AbortController();
         const poll = async ()=>{
@@ -69,8 +57,7 @@ export const OptimizationStatus = (props)=>{
                     originalSize: optimizer.originalSize,
                     optimizedSize: optimizer.optimizedSize,
                     thumbHash: optimizer.thumbHash,
-                    error: optimizer.error,
-                    variants: optimizer.variants
+                    error: optimizer.error
                 });
                 // If a user-initiated regeneration wrote a new revision (updatedAt
                 // advanced) and status is terminal, we're done.
@@ -91,8 +78,6 @@ export const OptimizationStatus = (props)=>{
             clearInterval(intervalId);
         };
     }, [
-        polledData?.status,
-        formStatus,
         collectionSlug,
         id,
         regenerating
@@ -113,27 +98,6 @@ export const OptimizationStatus = (props)=>{
         }
     }, [
         thumbHash
-    ]);
-    // Read variants from polled data or form state
-    const variants = React.useMemo(()=>{
-        if (polledData?.variants) return polledData.variants;
-        const variantsField = formState[`${basePath}.variants`];
-        const rowCount = variantsField?.rows?.length ?? 0;
-        const formVariants = [];
-        for(let i = 0; i < rowCount; i++){
-            formVariants.push({
-                format: formState[`${basePath}.variants.${i}.format`]?.value,
-                filename: formState[`${basePath}.variants.${i}.filename`]?.value,
-                filesize: formState[`${basePath}.variants.${i}.filesize`]?.value,
-                width: formState[`${basePath}.variants.${i}.width`]?.value,
-                height: formState[`${basePath}.variants.${i}.height`]?.value
-            });
-        }
-        return formVariants;
-    }, [
-        polledData?.variants,
-        formState,
-        basePath
     ]);
     const handleRegenerate = React.useCallback(async ()=>{
         if (!collectionSlug || !id || regenerating) return;
@@ -174,27 +138,13 @@ export const OptimizationStatus = (props)=>{
         id,
         regenerating
     ]);
-    if (!status) {
-        return /*#__PURE__*/ _jsx("div", {
-            style: {
-                padding: '12px 0'
-            },
-            children: /*#__PURE__*/ _jsx("div", {
-                style: {
-                    color: '#6b7280',
-                    fontSize: '13px'
-                },
-                children: "No optimization data yet. Upload an image to optimize."
-            })
-        });
-    }
     const savings = originalSize && optimizedSize ? Math.round((1 - optimizedSize / originalSize) * 100) : null;
     return /*#__PURE__*/ _jsxs("div", {
         style: {
             padding: '12px 0'
         },
         children: [
-            /*#__PURE__*/ _jsx("div", {
+            status ? /*#__PURE__*/ _jsx("div", {
                 style: {
                     marginBottom: '8px'
                 },
@@ -211,6 +161,13 @@ export const OptimizationStatus = (props)=>{
                     },
                     children: status
                 })
+            }) : /*#__PURE__*/ _jsx("div", {
+                style: {
+                    color: '#6b7280',
+                    fontSize: '13px',
+                    marginBottom: '8px'
+                },
+                children: "No optimization data yet. Click below to optimize."
             }),
             error && /*#__PURE__*/ _jsx("div", {
                 style: {
@@ -279,37 +236,6 @@ export const OptimizationStatus = (props)=>{
                     })
                 ]
             }),
-            variants.length > 0 && /*#__PURE__*/ _jsxs("div", {
-                children: [
-                    /*#__PURE__*/ _jsx("div", {
-                        style: {
-                            fontSize: '12px',
-                            marginBottom: '4px',
-                            opacity: 0.7
-                        },
-                        children: "Variants"
-                    }),
-                    variants.map((v, i)=>/*#__PURE__*/ _jsxs("div", {
-                            style: {
-                                fontSize: '12px',
-                                marginBottom: '2px'
-                            },
-                            children: [
-                                /*#__PURE__*/ _jsx("strong", {
-                                    children: v.format?.toUpperCase()
-                                }),
-                                " — ",
-                                v.filesize ? formatBytes(v.filesize) : '?',
-                                ' ',
-                                "(",
-                                v.width,
-                                "x",
-                                v.height,
-                                ")"
-                            ]
-                        }, i))
-                ]
-            }),
             collectionSlug && id != null && /*#__PURE__*/ _jsxs("div", {
                 style: {
                     marginTop: '12px',
@@ -333,7 +259,7 @@ export const OptimizationStatus = (props)=>{
                             fontWeight: 500,
                             cursor: regenerating ? 'wait' : 'pointer'
                         },
-                        children: regenerating ? 'Regenerating…' : 'Regenerate this image'
+                        children: regenerating ? status ? 'Regenerating…' : 'Optimizing…' : status ? 'Regenerate this image' : 'Optimize this image'
                     }),
                     regenError && /*#__PURE__*/ _jsx("span", {
                         style: {

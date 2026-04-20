@@ -4,8 +4,6 @@ import { translations } from './translations/index.js';
 import { getImageOptimizerField } from './fields/imageOptimizerField.js';
 import { createBeforeChangeHook } from './hooks/beforeChange.js';
 import { createBeforeOperationHook } from './hooks/beforeOperation.js';
-import { createAfterChangeHook } from './hooks/afterChange.js';
-import { createConvertFormatsHandler } from './tasks/convertFormats.js';
 import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js';
 import { createRegenerateHandler, createRegenerateStatusHandler, createCancelHandler } from './endpoints/regenerate.js';
 export { defaultImageOptimizerFields } from './fields/imageOptimizerField.js';
@@ -37,10 +35,10 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                 };
             }
             // ──────────────────────────────────────────────────────────────────────────
-            // v2 — Config-injection: hand off resize / format conversion / metadata
-            // strip to Payload's native generateFileData() pipeline. The plugin only
-            // owns ThumbHash, status tracking, optional filename strategy, and
-            // additive multi-format variants (e.g. AVIF alongside the WebP primary).
+            // Config-injection: hand off resize / format conversion / metadata strip
+            // to Payload's native generateFileData() pipeline. The plugin only owns
+            // ThumbHash, status tracking, optional filename strategy, and the
+            // regeneration UI.
             //
             // Non-override rule: if the user already set any of these on their
             // collection, we leave their value intact.
@@ -51,16 +49,17 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
             const hasUploadConfig = collection.upload != null && collection.upload !== false;
             const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collection.slug);
             const userUpload = typeof collection.upload === 'object' && collection.upload !== null ? collection.upload : {};
-            const primaryFormat = perCollectionConfig.formats[0];
+            const targetFormat = perCollectionConfig.format;
             const injectedUpload = {
                 ...userUpload
             };
-            // Parent format conversion — only when replaceOriginal AND a format is configured
-            if (perCollectionConfig.replaceOriginal && primaryFormat && userUpload.formatOptions === undefined) {
+            // Parent format conversion — inject when a format is configured and the
+            // user hasn't supplied their own formatOptions.
+            if (targetFormat && userUpload.formatOptions === undefined) {
                 injectedUpload.formatOptions = {
-                    format: primaryFormat.format,
+                    format: targetFormat.format,
                     options: {
-                        quality: primaryFormat.quality
+                        quality: targetFormat.quality
                     }
                 };
             }
@@ -83,8 +82,11 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                 }
             }
             // adminThumbnail — when the user hasn't already set one on the collection.
-            // - 'auto' (default): function form that returns Payload's canonical file
-            //   URL from `doc.filename`, surviving the v2 parent-extension change.
+            // - 'auto' (default): function form that prefers the smallest
+            //   pre-generated size's URL from `doc.sizes` (to avoid downloading the
+            //   full parent file into a ~50px list row), falling back to Payload's
+            //   canonical file URL from `doc.filename`. Surviving the v2
+            //   parent-extension change.
             // - string / function: pass through.
             //
             // Note: Payload's `upload.staticDir` is a filesystem path, not a URL
@@ -96,6 +98,21 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                     const slug = collection.slug;
                     injectedUpload.adminThumbnail = ({ doc })=>{
                         const filename = doc.filename;
+                        const sizes = doc.sizes;
+                        if (sizes) {
+                            let smallest = null;
+                            for (const v of Object.values(sizes)){
+                                if (!v) continue;
+                                if (typeof v.url !== 'string' || typeof v.width !== 'number') continue;
+                                if (!smallest || v.width < smallest.width) {
+                                    smallest = {
+                                        url: v.url,
+                                        width: v.width
+                                    };
+                                }
+                            }
+                            if (smallest) return smallest.url;
+                        }
                         if (!filename) return null;
                         return `/api/${slug}/file/${filename}`;
                     };
@@ -147,15 +164,15 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
             // produce meaningful names. Without it the only safe option is to derive
             // size names from the parent's `originalName`, which Payload already does
             // by default. Revisit if/when Payload exposes `data` to `generateImageName`.
-            if (primaryFormat && Array.isArray(userUpload.imageSizes)) {
+            if (targetFormat && Array.isArray(userUpload.imageSizes)) {
                 injectedUpload.imageSizes = userUpload.imageSizes.map((size)=>{
                     if (size.formatOptions !== undefined) return size;
                     return {
                         ...size,
                         formatOptions: {
-                            format: primaryFormat.format,
+                            format: targetFormat.format,
                             options: {
-                                quality: primaryFormat.quality
+                                quality: targetFormat.quality
                             }
                         }
                     };
@@ -176,10 +193,6 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                     beforeChange: [
                         ...collection.hooks?.beforeChange || [],
                         createBeforeChangeHook(resolvedConfig, collection.slug)
-                    ],
-                    afterChange: [
-                        ...collection.hooks?.afterChange || [],
-                        createAfterChangeHook(resolvedConfig, collection.slug)
                     ]
                 },
                 admin: {
@@ -241,29 +254,6 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
                 ...config.jobs,
                 tasks: [
                     ...config.jobs?.tasks || [],
-                    {
-                        slug: 'imageOptimizer_convertFormats',
-                        inputSchema: [
-                            {
-                                name: 'collectionSlug',
-                                type: 'text',
-                                required: true
-                            },
-                            {
-                                name: 'docId',
-                                type: 'text',
-                                required: true
-                            }
-                        ],
-                        outputSchema: [
-                            {
-                                name: 'variantsGenerated',
-                                type: 'number'
-                            }
-                        ],
-                        retries: 2,
-                        handler: createConvertFormatsHandler(resolvedConfig)
-                    },
                     {
                         slug: 'imageOptimizer_regenerateDocument',
                         inputSchema: [

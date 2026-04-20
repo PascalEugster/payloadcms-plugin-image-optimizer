@@ -26,12 +26,11 @@ export type FormatQuality = {
     quality: number;
 };
 export type CollectionOptimizerConfig = {
-    formats?: FormatQuality[];
+    format?: FormatQuality;
     maxDimensions?: {
         width: number;
         height: number;
     };
-    replaceOriginal?: boolean;
 };
 export type FieldsOverride = (args: {
     defaultFields: Field[];
@@ -60,7 +59,6 @@ export type ResolvedRegenerateButtonConfig = {
  */
 export type MetadataPolicy = (args: {
     metadata: any;
-    req: any;
 }) => boolean | Promise<boolean>;
 /**
  * Response header policy applied to file responses for targeted collections.
@@ -84,8 +82,8 @@ export type ResponseHeadersOption = false | 'immutable' | ((headers: Headers, ar
  * `adminThumbnail` strategy injected on each targeted collection.
  *
  * - `'auto'` (default) — inject a function form that returns a URL derived from
- *   `doc.filename`. Survives the parent-file extension change that v2 introduces
- *   when `replaceOriginal: true` (e.g. `.jpg` → `.webp`), where a hand-written
+ *   `doc.filename`. Survives the parent-file extension change that format
+ *   conversion introduces (e.g. `.jpg` → `.webp`), where a hand-written
  *   string-name reference like `'thumbnail'` would still work but a custom URL
  *   helper might break.
  * - `string` — passed through to Payload as a size-name reference (e.g. `'thumbnail'`).
@@ -103,7 +101,8 @@ export type ImageOptimizerConfig = {
     /** Inject an `adminThumbnail` for targeted collections.
      *
      * - `'auto'` (default) — inject a function that returns the file URL from
-     *   `doc.filename`, surviving the v2 parent-extension change.
+     *   `doc.filename`, surviving the parent-file extension change when format
+     *   conversion runs.
      * - string — pass through as a size-name reference.
      * - function — pass through as-is.
      *
@@ -113,7 +112,16 @@ export type ImageOptimizerConfig = {
     collections: Partial<Record<CollectionSlug, true | CollectionOptimizerConfig>>;
     disabled?: boolean;
     fieldsOverride?: FieldsOverride;
-    formats?: FormatQuality[];
+    /** Target format for the uploaded image. When set, the plugin injects
+     * `upload.formatOptions` into every targeted collection that doesn't already
+     * have one, and also injects `formatOptions` into each `imageSize` lacking one.
+     *
+     * Defaults to `{ format: 'webp', quality: 80 }`. Pass `null` or override at
+     * the collection level to disable format conversion entirely (original
+     * extension preserved).
+     *
+     * Non-override: respects an existing `upload.formatOptions`. */
+    format?: FormatQuality | null;
     /** Custom filename generation strategy. Return the filename **stem** (no extension).
      * The plugin appends the correct extension based on format conversion settings.
      *
@@ -162,7 +170,6 @@ export type ImageOptimizerConfig = {
      *   `allowForceAll: true` exposes the "Force re-process all" opt-in (default: `false`).
      */
     regenerateButton?: boolean | RegenerateButtonConfig;
-    replaceOriginal?: boolean;
     /** Opt-in response header policy for file responses on targeted collections.
      *
      * - `false` (default) — do nothing.
@@ -175,25 +182,26 @@ export type ImageOptimizerConfig = {
     stripMetadata?: boolean;
 };
 export type ResolvedCollectionOptimizerConfig = {
-    formats: FormatQuality[];
+    /** Null means "do not convert format" — preserve original extension. */
+    format: FormatQuality | null;
     maxDimensions: {
         width: number;
         height: number;
     };
-    replaceOriginal: boolean;
 };
-export type ResolvedImageOptimizerConfig = Required<Pick<ImageOptimizerConfig, 'formats' | 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>> & {
+export type ResolvedImageOptimizerConfig = Required<Pick<ImageOptimizerConfig, 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>> & {
     /** Resolved adminThumbnail option. Defaults to `'auto'`. */
     adminThumbnail: AdminThumbnailOption;
     clientOptimization: boolean;
     collections: ImageOptimizerConfig['collections'];
     disabled: boolean;
+    /** Resolved format. Null means "do not convert format" — preserve original extension. */
+    format: FormatQuality | null;
     /** Resolved filename generator. `undefined` means keep original filename. */
     generateFilename?: GenerateFilename;
     /** Resolved metadata-keep policy. When set, takes precedence over `stripMetadata`. */
     metadataPolicy?: MetadataPolicy;
     regenerateButton: ResolvedRegenerateButtonConfig;
-    replaceOriginal: boolean;
     /** Resolved response-header policy. Defaults to `false`. */
     responseHeaders: ResponseHeadersOption;
 };

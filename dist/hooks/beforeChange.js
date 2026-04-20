@@ -1,8 +1,8 @@
 import path from 'path';
-import { resolveCollectionConfig } from '../defaults.js';
+import sharp from 'sharp';
 import { generateThumbHash } from '../processing/index.js';
 /**
- * v2 — Config-injection architecture.
+ * Config-injection architecture.
  *
  * Payload's native `generateFileData()` pipeline (driven by
  * `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and
@@ -16,11 +16,69 @@ import { generateThumbHash } from '../processing/index.js';
  *   • the early-bail when Payload is re-fetching its own file for a focal-point
  *     adjustment (no need to re-stamp anything)
  *   • the imageOptimizer status field (originalSize, optimizedSize, status,
- *     thumbHash) and decision of whether an additive multi-format job is needed
+ *     thumbHash)
+ *
+ * Status is always `complete` after this hook runs — no async handoff.
  */ export const createBeforeChangeHook = (resolvedConfig, collectionSlug)=>{
     return async ({ context, data, originalDoc, req })=>{
         if (context?.imageOptimizer_skip) return data;
         if (!req.file || !req.file.data || !req.file.mimetype?.startsWith('image/')) return data;
+        // Guard: zero-byte buffer. Sharp throws on decode; let Payload handle the
+        // empty file at its own layer rather than corrupting a bogus status record.
+        if (req.file.data.length === 0) return data;
+        // Resolve the true original size before any guard short-circuits, so SVG,
+        // animated-GIF, and normal paths all report the same stat. Priority:
+        //   1. Client-submitted `data.imageOptimizer.originalSize` — the only
+        //      source that can see the pre-canvas byte count when client-side
+        //      resize is on.
+        //   2. `beforeOperation` context snapshot — the size that arrived at the
+        //      server, captured before `generateFileData` mutated `req.file`.
+        //   3. Current `req.file.data.length` — post-pipeline fallback for paths
+        //      that bypass `beforeOperation` (tests, programmatic creates).
+        //
+        // Guardrail on (1): must be a finite positive number and at least as
+        // large as the server-received size. A client can't legitimately claim
+        // the original was *smaller* than what it uploaded — if it does, ignore
+        // it rather than trust a tampered stat.
+        const serverReceivedSize = context?.imageOptimizer_originalSize ?? req.file.data.length;
+        const clientReported = data?.imageOptimizer?.originalSize;
+        const clientReportedValid = typeof clientReported === 'number' && Number.isFinite(clientReported) && clientReported >= serverReceivedSize;
+        const originalSize = clientReportedValid ? clientReported : serverReceivedSize;
+        // Guard: SVG. Sharp rasterizes vectors — format conversion to webp/avif
+        // produces a blurry raster, not a vector. Skip plugin optimization while
+        // still letting Payload persist the original file untouched.
+        if (req.file.mimetype === 'image/svg+xml') {
+            data.imageOptimizer = {
+                originalSize,
+                optimizedSize: req.file.data.length,
+                status: 'complete',
+                error: null
+            };
+            return data;
+        }
+        // Guard: animated GIF. Sharp's toFormat('webp') drops frames silently (keeps
+        // only the first) — data loss. Static GIFs (single page) fall through to
+        // normal processing. `pages: -1` asks sharp to read all pages so the
+        // metadata reports the true frame count.
+        if (req.file.mimetype === 'image/gif') {
+            try {
+                const metadata = await sharp(req.file.data, {
+                    pages: -1
+                }).metadata();
+                if (typeof metadata.pages === 'number' && metadata.pages > 1) {
+                    data.imageOptimizer = {
+                        originalSize,
+                        optimizedSize: req.file.data.length,
+                        status: 'complete',
+                        error: null
+                    };
+                    return data;
+                }
+            } catch  {
+            // If sharp can't parse the GIF at all, fall through so Payload's
+            // generateFileData surfaces the real error rather than masking it.
+            }
+        }
         // Detect re-upload triggered by Payload's shouldReupload() — focal point or crop change.
         // shouldReupload re-fetches the stored (already-optimized) file and sets req.file.
         // When re-fetching, Payload sets req.file.name to the stored filename verbatim
@@ -65,35 +123,22 @@ import { generateThumbHash } from '../processing/index.js';
             req.file.name = newFilename;
             data.filename = newFilename;
         }
-        const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug);
-        // Original size: captured by beforeOperation hook before generateFileData
-        // mutated req.file.size. Falls back to current req.file.size when unavailable
-        // (e.g. tests that bypass beforeOperation), in which case originalSize ==
-        // optimizedSize.
-        const originalSize = context?.imageOptimizer_originalSize ?? req.file.data.length;
         // Optimized size: req.file.data here is the post-resize/format buffer that
         // Payload will write. data.filesize was also populated by generateFileData
         // and is the same value, but req.file.data.length is the source of truth.
+        // `originalSize` was resolved above (client-reported → context → fallback).
         const optimizedSize = req.file.data.length;
-        // Multi-format mode requires the additive convertFormats job to handle
-        // formats[1..N] (formats[0] is already produced natively).
-        const needsAsyncJob = perCollectionConfig.formats.length > 1;
         data.imageOptimizer = {
             originalSize,
             optimizedSize,
-            status: needsAsyncJob ? 'pending' : 'complete',
-            variants: needsAsyncJob ? undefined : [],
+            status: 'complete',
             error: null
         };
-        // Single-format mode: compute ThumbHash inline so it lands in the initial
-        // DB write (avoids a follow-up update that fails on MongoDB transactions
-        // when cloud storage is involved).
-        if (resolvedConfig.generateThumbHash && !needsAsyncJob) {
+        // Compute ThumbHash inline so it lands in the initial DB write (avoids a
+        // follow-up update that can fail on MongoDB transactions when cloud
+        // storage is involved).
+        if (resolvedConfig.generateThumbHash) {
             data.imageOptimizer.thumbHash = await generateThumbHash(req.file.data);
-        }
-        context.imageOptimizer_hasUpload = true;
-        if (!needsAsyncJob) {
-            context.imageOptimizer_statusResolved = true;
         }
         return data;
     };

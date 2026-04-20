@@ -37,12 +37,36 @@ export const createBeforeChangeHook = (
     // empty file at its own layer rather than corrupting a bogus status record.
     if (req.file.data.length === 0) return data
 
+    // Resolve the true original size before any guard short-circuits, so SVG,
+    // animated-GIF, and normal paths all report the same stat. Priority:
+    //   1. Client-submitted `data.imageOptimizer.originalSize` — the only
+    //      source that can see the pre-canvas byte count when client-side
+    //      resize is on.
+    //   2. `beforeOperation` context snapshot — the size that arrived at the
+    //      server, captured before `generateFileData` mutated `req.file`.
+    //   3. Current `req.file.data.length` — post-pipeline fallback for paths
+    //      that bypass `beforeOperation` (tests, programmatic creates).
+    //
+    // Guardrail on (1): must be a finite positive number and at least as
+    // large as the server-received size. A client can't legitimately claim
+    // the original was *smaller* than what it uploaded — if it does, ignore
+    // it rather than trust a tampered stat.
+    const serverReceivedSize =
+      (context?.imageOptimizer_originalSize as number | undefined) ?? req.file.data.length
+    const clientReported = (data as { imageOptimizer?: { originalSize?: unknown } })
+      ?.imageOptimizer?.originalSize
+    const clientReportedValid =
+      typeof clientReported === 'number' &&
+      Number.isFinite(clientReported) &&
+      clientReported >= serverReceivedSize
+    const originalSize = clientReportedValid ? clientReported : serverReceivedSize
+
     // Guard: SVG. Sharp rasterizes vectors — format conversion to webp/avif
     // produces a blurry raster, not a vector. Skip plugin optimization while
     // still letting Payload persist the original file untouched.
     if (req.file.mimetype === 'image/svg+xml') {
       data.imageOptimizer = {
-        originalSize: req.file.data.length,
+        originalSize,
         optimizedSize: req.file.data.length,
         status: 'complete',
         error: null,
@@ -59,7 +83,7 @@ export const createBeforeChangeHook = (
         const metadata = await sharp(req.file.data, { pages: -1 }).metadata()
         if (typeof metadata.pages === 'number' && metadata.pages > 1) {
           data.imageOptimizer = {
-            originalSize: req.file.data.length,
+            originalSize,
             optimizedSize: req.file.data.length,
             status: 'complete',
             error: null,
@@ -119,16 +143,10 @@ export const createBeforeChangeHook = (
       data.filename = newFilename
     }
 
-    // Original size: captured by beforeOperation hook before generateFileData
-    // mutated req.file.size. Falls back to current req.file.size when unavailable
-    // (e.g. tests that bypass beforeOperation), in which case originalSize ==
-    // optimizedSize.
-    const originalSize =
-      (context?.imageOptimizer_originalSize as number | undefined) ?? req.file.data.length
-
     // Optimized size: req.file.data here is the post-resize/format buffer that
     // Payload will write. data.filesize was also populated by generateFileData
     // and is the same value, but req.file.data.length is the source of truth.
+    // `originalSize` was resolved above (client-reported → context → fallback).
     const optimizedSize = req.file.data.length
 
     data.imageOptimizer = {

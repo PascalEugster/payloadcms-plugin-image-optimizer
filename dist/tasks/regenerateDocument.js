@@ -1,19 +1,17 @@
 import path from 'path';
-import { fetchFileBuffer, isCloudStorage } from '../utilities/storage.js';
+import { fetchFileBuffer } from '../utilities/storage.js';
 const GLOBAL_SLUG = 'image-optimizer-state';
 /**
- * v2 — Regeneration via Payload's native pipeline.
+ * Regeneration via Payload's native pipeline.
  *
  * Reads the existing parent file, then calls `payload.update({ file })` to
  * push it back through the same pipeline a fresh upload uses. Because the
  * plugin injects `formatOptions` / `resizeOptions` / `withMetadata` into the
  * upload config at init, Payload's `generateFileData()` re-applies the same
  * resize + format conversion + metadata strip pass, and our `beforeChange`
- * hook re-stamps `imageOptimizer` (status + thumbhash) and queues additive
- * variants if the collection is multi-format.
+ * hook re-stamps `imageOptimizer` (status + thumbhash).
  *
- * For cloud storage we re-upload via the same update call so the cloud
- * adapter's afterChange hook re-uploads the file.
+ * For cloud storage the same call re-uploads via the adapter's afterChange.
  */ export const createRegenerateDocumentHandler = (resolvedConfig)=>{
     return async ({ input, req })=>{
         try {
@@ -48,19 +46,29 @@ const GLOBAL_SLUG = 'image-optimizer-state';
                 };
             }
             const collectionConfig = req.payload.collections[input.collectionSlug].config;
-            const fileBuffer = await fetchFileBuffer(doc, collectionConfig);
+            const fileBuffer = await fetchFileBuffer(doc, collectionConfig, req.payload.config.serverURL);
             const safeFilename = path.basename(doc.filename);
+            // Carry forward the previously recorded `originalSize` (set on first
+            // upload, possibly from the pre-client-resize byte count). Without this
+            // the regeneration would fall through to `req.file.size` which is the
+            // *already-optimized* stored buffer — shrinking the reported original
+            // on every regen and making savings trend toward zero.
+            const carriedOriginalSize = doc.imageOptimizer?.originalSize;
             // Push the file through Payload's native pipeline. The `file` argument
             // triggers `generateFileData` to run again, which respects the
             // formatOptions / resizeOptions / withMetadata injected at plugin init.
-            // Our beforeChange hook re-stamps imageOptimizer; afterChange queues
-            // additive variants if multi-format.
+            // beforeChange re-stamps imageOptimizer (originalSize, optimizedSize,
+            // thumbHash, status='complete').
             //
             // For cloud storage the same call re-uploads via the adapter's hook.
             await req.payload.update({
                 collection: input.collectionSlug,
                 id: input.docId,
-                data: {},
+                data: typeof carriedOriginalSize === 'number' ? {
+                    imageOptimizer: {
+                        originalSize: carriedOriginalSize
+                    }
+                } : {},
                 file: {
                     data: fileBuffer,
                     mimetype: doc.mimeType,
@@ -76,18 +84,6 @@ const GLOBAL_SLUG = 'image-optimizer-state';
                     imageOptimizer_regenerating: true
                 }
             });
-            // Mark as cloud-storage-complete: the multi-format job won't run for
-            // cloud storage (variants are skipped), so no further action needed.
-            // For local storage the additive job (queued by afterChange) will run
-            // separately via payload.jobs.run() invoked by the regen orchestrator.
-            const cloudStorage = isCloudStorage(collectionConfig);
-            if (cloudStorage) {
-                return {
-                    output: {
-                        status: 'complete'
-                    }
-                };
-            }
             return {
                 output: {
                     status: 'complete'

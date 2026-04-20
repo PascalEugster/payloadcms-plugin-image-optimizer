@@ -11,7 +11,12 @@ import { resolveStaticDir } from './resolveStaticDir.js';
  * Reads a file buffer from local disk or fetches it from URL.
  * Tries local disk first (when available), falls back to URL fetch.
  * This makes the plugin storage-agnostic — works with local FS and cloud storage alike.
- */ export async function fetchFileBuffer(doc, collectionConfig) {
+ *
+ * `serverURL` is used as the base when `doc.url` is relative. Callers should
+ * pass `req.payload.config.serverURL` so the plugin stays framework-agnostic.
+ * `NEXT_PUBLIC_SERVER_URL` is kept as a fallback for backwards compatibility
+ * with legacy callers that predate this parameter.
+ */ export async function fetchFileBuffer(doc, collectionConfig, serverURL) {
     const safeFilename = doc.filename ? path.basename(doc.filename) : undefined;
     // Try local disk first (only when local storage is enabled)
     if (!isCloudStorage(collectionConfig) && safeFilename) {
@@ -26,9 +31,10 @@ import { resolveStaticDir } from './resolveStaticDir.js';
     }
     // Fetch from URL (works for cloud storage and as fallback for local)
     if (doc.url) {
-        const url = doc.url.startsWith('http') ? doc.url : `${process.env.NEXT_PUBLIC_SERVER_URL || ''}${doc.url}`;
+        const baseURL = serverURL || process.env.NEXT_PUBLIC_SERVER_URL || '';
+        const url = doc.url.startsWith('http') ? doc.url : `${baseURL}${doc.url}`;
         if (!url.startsWith('http')) {
-            throw new Error(`Cannot fetch file "${doc.filename}": URL "${doc.url}" is relative and NEXT_PUBLIC_SERVER_URL is not set`);
+            throw new Error(`Cannot fetch file "${doc.filename}": URL "${doc.url}" is relative and no serverURL is configured (pass payload.config.serverURL or set NEXT_PUBLIC_SERVER_URL)`);
         }
         const response = await fetch(url, {
             signal: AbortSignal.timeout(30_000)

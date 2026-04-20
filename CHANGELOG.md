@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.0.1 — Accurate savings stat when client-side optimization is on
+
+### Fixed
+
+- **`imageOptimizer.originalSize` now reflects the true pre-upload file size.** When `clientOptimization: true` (default), the browser canvas pre-resizes large images before upload, and the server-only `beforeOperation` snapshot could only see the already-shrunk buffer — so the admin UI's "saved X%" stat silently under-reported the real optimization win. The client now writes `file.size` into `imageOptimizer.originalSize` via `useField` before canvas runs, and `beforeChange` trusts that value subject to a guardrail (`clientReported >= serverReceivedSize`; otherwise falls back to the server snapshot). Uploads that bypass the admin UI (REST API, programmatic creates) are unaffected — the server fallback path gives the same value it always has.
+- **Regeneration no longer collapses `originalSize` toward zero.** The `regenerateDocument` task previously passed `data: {}` to `payload.update`, so `beforeChange` re-resolved `originalSize` to the already-optimized stored buffer on each run. The task now carries forward the doc's existing `imageOptimizer.originalSize` through the same data path, which lets the hook's trust-but-verify logic handle both fresh uploads and regeneration uniformly.
+
+### Internal
+
+- Hoisted the `originalSize` resolution in `beforeChange` above the SVG and animated-GIF guard paths so all three write-sites report a consistent value.
+
+---
+
 ## 3.0.0 — Honest positioning: remove features Payload already does
 
 Breaking release. The plugin now only ships what Payload can't do natively. Everything Payload handles well (resize, format, EXIF strip, per-size variants, focal-point crops) stays configured through the plugin, but via one-to-one pass-throughs to `upload.formatOptions` / `upload.resizeOptions` / `upload.withMetadata`. The additional plumbing that existed to layer *on top of* that pipeline is gone.

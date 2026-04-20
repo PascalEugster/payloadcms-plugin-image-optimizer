@@ -15,8 +15,6 @@ export const defaultImageOptimizerFields = [
         name: 'status',
         type: 'select',
         options: [
-            'pending',
-            'processing',
             'complete',
             'error'
         ]
@@ -24,40 +22,6 @@ export const defaultImageOptimizerFields = [
     {
         name: 'error',
         type: 'text'
-    },
-    {
-        name: 'variants',
-        type: 'array',
-        fields: [
-            {
-                name: 'format',
-                type: 'text'
-            },
-            {
-                name: 'filename',
-                type: 'text'
-            },
-            {
-                name: 'filesize',
-                type: 'number'
-            },
-            {
-                name: 'width',
-                type: 'number'
-            },
-            {
-                name: 'height',
-                type: 'number'
-            },
-            {
-                name: 'mimeType',
-                type: 'text'
-            },
-            {
-                name: 'url',
-                type: 'text'
-            }
-        ]
     }
 ];
 export const getImageOptimizerField = (fieldsOverride)=>({

@@ -49,6 +49,14 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
       const fileBuffer = await fetchFileBuffer(doc, collectionConfig, req.payload.config.serverURL)
       const safeFilename = path.basename(doc.filename)
 
+      // Carry forward the previously recorded `originalSize` (set on first
+      // upload, possibly from the pre-client-resize byte count). Without this
+      // the regeneration would fall through to `req.file.size` which is the
+      // *already-optimized* stored buffer — shrinking the reported original
+      // on every regen and making savings trend toward zero.
+      const carriedOriginalSize = (doc as { imageOptimizer?: { originalSize?: number } })
+        .imageOptimizer?.originalSize
+
       // Push the file through Payload's native pipeline. The `file` argument
       // triggers `generateFileData` to run again, which respects the
       // formatOptions / resizeOptions / withMetadata injected at plugin init.
@@ -59,7 +67,10 @@ export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOpt
       await req.payload.update({
         collection: input.collectionSlug as CollectionSlug,
         id: input.docId,
-        data: {},
+        data:
+          typeof carriedOriginalSize === 'number'
+            ? { imageOptimizer: { originalSize: carriedOriginalSize } }
+            : {},
         file: {
           data: fileBuffer,
           mimetype: doc.mimeType,

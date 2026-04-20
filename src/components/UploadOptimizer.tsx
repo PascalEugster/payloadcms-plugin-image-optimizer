@@ -9,6 +9,13 @@ export const UploadOptimizer: React.FC = () => {
   const { collectionSlug, docConfig, initialState, setUploadStatus } = useDocumentInfo()
   const uploadConfig = docConfig && 'upload' in docConfig ? docConfig.upload : undefined
   const { value: fileValue, setValue: setFileValue } = useField<File | null>({ path: 'file' })
+  // Record the true pre-resize byte count so the server can report accurate
+  // savings. Without this, `beforeOperation` would only see the post-canvas
+  // buffer and `originalSize` would equal the browser-compressed size, making
+  // the admin UI stat silently under-report the full optimization win.
+  const { setValue: setReportedOriginalSize } = useField<number | null>({
+    path: 'imageOptimizer.originalSize',
+  })
   const processedFiles = useRef(new WeakSet<File>())
   const [optimizing, setOptimizing] = useState(false)
   const { t } = useTranslation()
@@ -32,6 +39,14 @@ export const UploadOptimizer: React.FC = () => {
     // body reaches /api/media and returns 400.
     setUploadStatus?.('uploading')
     setOptimizing(true)
+
+    // Snapshot the byte count BEFORE canvas touches the file. Written whether
+    // or not resize actually fires — if the file is small/non-resizable this
+    // just equals the server-received size, which is also the correct
+    // `originalSize`. Server reads this back in `beforeChange` with a
+    // guardrail.
+    const preResizeSize = fileValue.size
+    setReportedOriginalSize(preResizeSize)
 
     handleResize(fileValue)
       .then((resized) => {
@@ -57,7 +72,7 @@ export const UploadOptimizer: React.FC = () => {
       // Ensure Save is re-enabled if the component unmounts mid-resize.
       setUploadStatus?.('idle')
     }
-  }, [fileValue, handleResize, setFileValue, setUploadStatus])
+  }, [fileValue, handleResize, setFileValue, setReportedOriginalSize, setUploadStatus])
 
   if (!collectionSlug || !uploadConfig) return null
 

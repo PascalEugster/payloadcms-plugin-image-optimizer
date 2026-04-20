@@ -1,3 +1,7 @@
+const DEFAULT_FORMAT = {
+    format: 'webp',
+    quality: 80
+};
 const resolveRegenerateButton = (value)=>{
     if (value === false) return {
         enabled: false,
@@ -17,12 +21,7 @@ export const resolveConfig = (config)=>({
         clientOptimization: config.clientOptimization ?? true,
         collections: config.collections,
         disabled: config.disabled ?? false,
-        formats: config.formats ?? [
-            {
-                format: 'webp',
-                quality: 80
-            }
-        ],
+        format: config.format === null ? null : config.format ?? DEFAULT_FORMAT,
         generateFilename: config.generateFilename,
         generateThumbHash: config.generateThumbHash ?? true,
         maxDimensions: config.maxDimensions ?? {
@@ -31,7 +30,6 @@ export const resolveConfig = (config)=>({
         },
         metadataPolicy: config.metadataPolicy,
         regenerateButton: resolveRegenerateButton(config.regenerateButton),
-        replaceOriginal: config.replaceOriginal ?? true,
         responseHeaders: config.responseHeaders ?? false,
         stripMetadata: config.stripMetadata ?? true
     });
@@ -39,15 +37,13 @@ export const resolveCollectionConfig = (resolvedConfig, collectionSlug)=>{
     const collectionValue = resolvedConfig.collections[collectionSlug];
     if (!collectionValue || collectionValue === true) {
         return {
-            formats: resolvedConfig.formats,
-            maxDimensions: resolvedConfig.maxDimensions,
-            replaceOriginal: resolvedConfig.replaceOriginal
+            format: resolvedConfig.format,
+            maxDimensions: resolvedConfig.maxDimensions
         };
     }
     return {
-        formats: collectionValue.formats ?? resolvedConfig.formats,
-        maxDimensions: collectionValue.maxDimensions ?? resolvedConfig.maxDimensions,
-        replaceOriginal: collectionValue.replaceOriginal ?? resolvedConfig.replaceOriginal
+        format: collectionValue.format ?? resolvedConfig.format,
+        maxDimensions: collectionValue.maxDimensions ?? resolvedConfig.maxDimensions
     };
 };
 

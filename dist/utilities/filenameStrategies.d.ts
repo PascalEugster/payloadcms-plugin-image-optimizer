@@ -11,14 +11,17 @@ export declare const uuidFilename: ({ existingFilename }: GenerateFilenameArgs) 
  * SEO-friendly filename strategy.
  *
  * Generates human-readable, URL-safe filenames from alt text:
- *   "Geländer aus Edelstahl" → `gelander-aus-edelstahl-20260327T120000Z`
+ *   "Geländer aus Edelstahl" → `gelander-aus-edelstahl-20260327T120000000Z`
  *
  * Processing pipeline:
  *  1. Uses alt text, falls back to original filename stem, then "media"
  *  2. Strips diacritics (ä→a, ö→o, ü→u, é→e)
  *  3. Converts to kebab-case
- *  4. Truncates to 60 characters (clean break, no trailing hyphens)
- *  5. Appends ISO timestamp for uniqueness (YYYYMMDDTHHMMSSmmm)
+ *  4. If the slug is empty (non-Latin scripts like Cyrillic, CJK, Arabic that
+ *     can't be ASCII'd), falls back to `img-<8 hex chars>` derived from a
+ *     sha256 hash of the source + current time for uniqueness.
+ *  5. Truncates to 60 characters (clean break, no trailing hyphens)
+ *  6. Appends ISO timestamp with milliseconds for uniqueness (YYYYMMDDTHHMMSSmmmZ)
  *
  * On re-uploads, reuses the existing filename stem to avoid cloud storage churn.
  */
@@ -41,8 +44,8 @@ export declare const seoFilename: ({ altText, existingFilename, originalFilename
  *  4. Truncates to 60 characters (clean break, no trailing hyphens)
  *  5. Appends ISO timestamp with milliseconds (YYYYMMDDTHHMMSSmmmZ)
  *
- * Milliseconds are included (unlike `seoFilename`) because the stem alone
- * provides no variation between uploads of the same source file.
+ * Milliseconds are included because the stem alone provides no variation
+ * between uploads of the same source file.
  *
  * On re-uploads, reuses the existing filename stem to avoid cloud storage churn.
  */
