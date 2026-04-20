@@ -3,7 +3,6 @@ export const translations = {
     'plugin-imageOptimizer': {
       noData: 'No optimization data yet. Upload an image to optimize.',
       blurPreview: 'Blur Preview',
-      variants: 'Variants',
       original: 'Original',
       optimized: 'Optimized',
       regenerateImages: 'Regenerate Images',
@@ -24,7 +23,6 @@ export const translations = {
     'plugin-imageOptimizer': {
       noData: 'Noch keine Optimierungsdaten. Laden Sie ein Bild hoch.',
       blurPreview: 'Unschärfe-Vorschau',
-      variants: 'Varianten',
       original: 'Original',
       optimized: 'Optimiert',
       regenerateImages: 'Bilder regenerieren',
@@ -45,7 +43,6 @@ export const translations = {
     'plugin-imageOptimizer': {
       noData: "Aucune donnée d'optimisation. Téléchargez une image.",
       blurPreview: 'Aperçu flou',
-      variants: 'Variantes',
       original: 'Original',
       optimized: 'Optimisé',
       regenerateImages: 'Régénérer les images',

@@ -13,8 +13,6 @@ const formatBytes = (bytes: number): string => {
 }
 
 const statusColors: Record<string, string> = {
-  pending: '#f59e0b',
-  processing: '#3b82f6',
   complete: '#10b981',
   error: '#ef4444',
 }
@@ -27,13 +25,6 @@ type PolledData = {
   optimizedSize?: number
   thumbHash?: string
   error?: string
-  variants?: Array<{
-    format?: string
-    filename?: string
-    filesize?: number
-    width?: number
-    height?: number
-  }>
 }
 
 export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
@@ -55,20 +46,11 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
   // can't rely on a status transition to signal completion).
   const regenerateStartRef = React.useRef<string | null>(null)
 
-  // Reset polled data when a new upload changes the form status back to pending
+  // Poll for status updates only while a regeneration we initiated is in
+  // flight. beforeChange now always resolves status to 'complete' or 'error'
+  // synchronously, so there's no "non-terminal" state to poll for on upload.
   React.useEffect(() => {
-    if (formStatus === 'pending') {
-      setPolledData(null)
-    }
-  }, [formStatus])
-
-  // Poll for status updates when status is non-terminal OR a regeneration
-  // we initiated is still in flight.
-  React.useEffect(() => {
-    const currentStatus = polledData?.status ?? formStatus
-    const terminal = currentStatus === 'complete' || currentStatus === 'error'
-    if (terminal && !regenerating) return
-    if (!currentStatus && !regenerating) return
+    if (!regenerating) return
     if (!collectionSlug || !id) return
 
     const controller = new AbortController()
@@ -89,7 +71,6 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
           optimizedSize: optimizer.optimizedSize,
           thumbHash: optimizer.thumbHash,
           error: optimizer.error,
-          variants: optimizer.variants,
         })
 
         // If a user-initiated regeneration wrote a new revision (updatedAt
@@ -118,7 +99,7 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
       controller.abort()
       clearInterval(intervalId)
     }
-  }, [polledData?.status, formStatus, collectionSlug, id, regenerating])
+  }, [collectionSlug, id, regenerating])
 
   // Use polled data when available, otherwise fall back to form state
   const status = polledData?.status ?? formStatus
@@ -136,31 +117,6 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
       return null
     }
   }, [thumbHash])
-
-  // Read variants from polled data or form state
-  const variants: Array<{
-    format?: string
-    filename?: string
-    filesize?: number
-    width?: number
-    height?: number
-  }> = React.useMemo(() => {
-    if (polledData?.variants) return polledData.variants
-
-    const variantsField = formState[`${basePath}.variants`]
-    const rowCount = (variantsField as any)?.rows?.length ?? 0
-    const formVariants: typeof variants = []
-    for (let i = 0; i < rowCount; i++) {
-      formVariants.push({
-        format: formState[`${basePath}.variants.${i}.format`]?.value as string | undefined,
-        filename: formState[`${basePath}.variants.${i}.filename`]?.value as string | undefined,
-        filesize: formState[`${basePath}.variants.${i}.filesize`]?.value as number | undefined,
-        width: formState[`${basePath}.variants.${i}.width`]?.value as number | undefined,
-        height: formState[`${basePath}.variants.${i}.height`]?.value as number | undefined,
-      })
-    }
-    return formVariants
-  }, [polledData?.variants, formState, basePath])
 
   const handleRegenerate = React.useCallback(async () => {
     if (!collectionSlug || !id || regenerating) return
@@ -247,18 +203,6 @@ export const OptimizationStatus: React.FC<{ path?: string }> = (props) => {
             src={thumbHashUrl}
             style={{ borderRadius: '4px', height: '40px', width: 'auto' }}
           />
-        </div>
-      )}
-
-      {variants.length > 0 && (
-        <div>
-          <div style={{ fontSize: '12px', marginBottom: '4px', opacity: 0.7 }}>Variants</div>
-          {variants.map((v, i) => (
-            <div key={i} style={{ fontSize: '12px', marginBottom: '2px' }}>
-              <strong>{v.format?.toUpperCase()}</strong> — {v.filesize ? formatBytes(v.filesize) : '?'}{' '}
-              ({v.width}x{v.height})
-            </div>
-          ))}
         </div>
       )}
 
