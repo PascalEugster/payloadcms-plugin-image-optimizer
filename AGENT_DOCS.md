@@ -111,7 +111,7 @@ export type ImageOptimizerConfig = {
 | `metadataPolicy` | `(args: { metadata, req }) => boolean \| Promise<boolean>` | — | Richer alternative. Passed through as Payload's `withMetadata` callback. Return `true` to keep, `false` to strip. Takes precedence over `stripMetadata`. |
 | `replaceOriginal` | `boolean` | `true` | When true, injects `formatOptions` for the parent file. When false, parent stays in its original format and every configured format lands as an additive variant. |
 | `generateThumbHash` | `boolean` | `true` | Plugin-owned. Runs inline in `beforeChange` for single-format configs; runs inside `convertFormats` job for multi-format configs. |
-| `generateFilename` | `(args: GenerateFilenameArgs) => string` | — | Returns filename **stem** (no extension). Built-ins: `uuidFilename`, `seoFilename`. **Incompatible with `clientUploads: true`** — blob pathname is locked at sign time (`@payloadcms/storage-vercel-blob`'s `getClientUploadRoute`); any rename in `beforeChange` would desync DB from blob. With `clientUploads: true`, use `addRandomSuffix: true` on the storage adapter instead. |
+| `generateFilename` | `(args: GenerateFilenameArgs) => string` | — | Returns filename **stem** (no extension). Built-ins: `uuidFilename`, `seoFilename`, `timestampFilename`. **Incompatible with `clientUploads: true`** — blob pathname is locked at sign time (`@payloadcms/storage-vercel-blob`'s `getClientUploadRoute`); any rename in `beforeChange` would desync DB from blob. With `clientUploads: true`, use `addRandomSuffix: true` on the storage adapter instead. |
 | `clientOptimization` | `boolean` | `true` | Replace the admin upload component with `UploadOptimizer` (Canvas pre-resize). |
 | `regenerateButton` | `boolean \| { enabled?, allowForceAll? }` | `true` | Controls the collection-list regeneration button and whether "Force re-process all" is exposed. |
 | `adminThumbnail` | `'auto' \| string \| function` | `'auto'` | See below. |
@@ -356,8 +356,9 @@ type GenerateFilenameArgs = {
 
 Built-in strategies exported from the package root:
 
-- `uuidFilename` — UUID v4 stem.
-- `seoFilename` — slugified alt text + short timestamp fallback.
+- `uuidFilename` — UUID v4 stem. No human readability, no collisions.
+- `seoFilename` — slugified alt text + second-precision ISO timestamp. Falls back to the original stem when alt text is missing.
+- `timestampFilename` — original stem (slugified) + millisecond-precision ISO timestamp. Use when you want the original filename preserved but still need uniqueness. Ms precision (vs seoFilename's seconds) because there's no alt-text variation to help disambiguate.
 
 Resolution (`src/defaults.ts`): `config.generateFilename` is passed through; `undefined` keeps the original stem.
 

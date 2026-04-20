@@ -122,8 +122,9 @@ export type ImageOptimizerConfig = {
    * The plugin appends the correct extension based on format conversion settings.
    *
    * Built-in strategies:
-   * - `uuidFilename` — UUID-based, collision-free
-   * - `seoFilename` — Human-readable from alt text + timestamp
+   * - `uuidFilename` — UUID-based, collision-free, no human readability
+   * - `seoFilename` — Human-readable from alt text + timestamp (falls back to original stem)
+   * - `timestampFilename` — Original filename stem + ISO timestamp with ms
    *
    * @example
    * ```ts

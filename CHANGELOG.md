@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.1.2 — New `timestampFilename` strategy
+
+Additive, non-breaking. Adds a third built-in filename strategy for users who want to keep the original filename but need collision-free uniqueness without UUID noise or alt-text dependency.
+
+### Added
+
+- **`timestampFilename`** — exported from the package root alongside `uuidFilename` and `seoFilename`. Takes the original filename stem (slugified — diacritics stripped, kebab-cased, truncated to 60 chars) and appends an ISO timestamp with milliseconds.
+
+  ```ts
+  import { imageOptimizer, timestampFilename } from '@inoo-ch/payload-image-optimizer'
+
+  imageOptimizer({
+    collections: { media: true },
+    generateFilename: timestampFilename, // Geländer.jpg → gelander-20260420T104530123Z.webp
+  })
+  ```
+
+  Milliseconds are included (unlike `seoFilename`'s second precision) because the stem alone provides no variation between two uploads of the same source file.
+
+  Re-upload behavior (crop / focal point edits) reuses the existing stem to avoid cloud-storage churn, same as the other two built-ins.
+
+### Choosing a strategy
+
+| Strategy | Output | When to use |
+|---|---|---|
+| `uuidFilename` | `a1b2c3d4-e5f6-....webp` | You want total collision avoidance and don't care about readability. Shortest filenames. |
+| `seoFilename` | `gelander-aus-edelstahl-20260420T104530Z.webp` | You have meaningful `altText` and want URLs that describe the content. |
+| `timestampFilename` | `gelander-foto-20260420T104530123Z.webp` | You curated filenames before upload and want them preserved, but still need uniqueness. |
+
+All three are subject to the same `clientUploads: true` incompatibility documented in 2.1.1 — use `addRandomSuffix: true` on the storage adapter in that mode.
+
+---
+
 ## 2.1.1 — Docs: `clientUploads` incompatibility with `generateFilename`
 
 Documentation-only patch. No code changes.

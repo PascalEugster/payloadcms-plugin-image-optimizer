@@ -16,7 +16,7 @@ export type { ImageOptimizerConfig, ImageFormat, FormatQuality, CollectionOptimi
 export { defaultImageOptimizerFields } from './fields/imageOptimizerField.js'
 
 export { encodeImageToThumbHash, decodeThumbHashToDataURL } from './utilities/thumbhash.js'
-export { uuidFilename, seoFilename } from './utilities/filenameStrategies.js'
+export { uuidFilename, seoFilename, timestampFilename } from './utilities/filenameStrategies.js'
 
 /**
  * Recommended maxDuration for the Payload API route on Vercel.

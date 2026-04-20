@@ -28,6 +28,7 @@ export default defineConfig(() => {
         'dev/responseHeaders.unit.spec.ts',
         'dev/metadataPolicy.unit.spec.ts',
         'dev/clientResize.unit.spec.ts',
+        'dev/filenameStrategies.unit.spec.ts',
       ],
     },
   }

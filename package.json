@@ -1,6 +1,6 @@
 {
   "name": "@inoo-ch/payload-image-optimizer",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Payload CMS plugin for automatic image optimization — WebP/AVIF conversion, resize, EXIF strip, ThumbHash placeholders, and bulk regeneration",
   "license": "MIT",
   "keywords": [

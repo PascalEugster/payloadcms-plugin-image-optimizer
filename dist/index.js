@@ -10,7 +10,7 @@ import { createRegenerateDocumentHandler } from './tasks/regenerateDocument.js';
 import { createRegenerateHandler, createRegenerateStatusHandler, createCancelHandler } from './endpoints/regenerate.js';
 export { defaultImageOptimizerFields } from './fields/imageOptimizerField.js';
 export { encodeImageToThumbHash, decodeThumbHashToDataURL } from './utilities/thumbhash.js';
-export { uuidFilename, seoFilename } from './utilities/filenameStrategies.js';
+export { uuidFilename, seoFilename, timestampFilename } from './utilities/filenameStrategies.js';
 /**
  * Recommended maxDuration for the Payload API route on Vercel.
  * Re-export this in your route file:
