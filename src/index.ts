@@ -44,10 +44,10 @@ export const imageOptimizer =
       }
 
       // ──────────────────────────────────────────────────────────────────────────
-      // v2 — Config-injection: hand off resize / format conversion / metadata
-      // strip to Payload's native generateFileData() pipeline. The plugin only
-      // owns ThumbHash, status tracking, optional filename strategy, and
-      // additive multi-format variants (e.g. AVIF alongside the WebP primary).
+      // Config-injection: hand off resize / format conversion / metadata strip
+      // to Payload's native generateFileData() pipeline. The plugin only owns
+      // ThumbHash, status tracking, optional filename strategy, and the
+      // regeneration UI.
       //
       // Non-override rule: if the user already set any of these on their
       // collection, we leave their value intact.
@@ -62,19 +62,16 @@ export const imageOptimizer =
           ? collection.upload
           : ({} as Record<string, unknown>)
 
-      const primaryFormat = perCollectionConfig.formats[0]
+      const targetFormat = perCollectionConfig.format
 
       const injectedUpload: Record<string, unknown> = { ...userUpload }
 
-      // Parent format conversion — only when replaceOriginal AND a format is configured
-      if (
-        perCollectionConfig.replaceOriginal &&
-        primaryFormat &&
-        userUpload.formatOptions === undefined
-      ) {
+      // Parent format conversion — inject when a format is configured and the
+      // user hasn't supplied their own formatOptions.
+      if (targetFormat && userUpload.formatOptions === undefined) {
         injectedUpload.formatOptions = {
-          format: primaryFormat.format,
-          options: { quality: primaryFormat.quality },
+          format: targetFormat.format,
+          options: { quality: targetFormat.quality },
         }
       }
 
@@ -192,15 +189,15 @@ export const imageOptimizer =
       // produce meaningful names. Without it the only safe option is to derive
       // size names from the parent's `originalName`, which Payload already does
       // by default. Revisit if/when Payload exposes `data` to `generateImageName`.
-      if (primaryFormat && Array.isArray(userUpload.imageSizes)) {
+      if (targetFormat && Array.isArray(userUpload.imageSizes)) {
         injectedUpload.imageSizes = (userUpload.imageSizes as Array<Record<string, unknown>>).map(
           (size) => {
             if (size.formatOptions !== undefined) return size
             return {
               ...size,
               formatOptions: {
-                format: primaryFormat.format,
-                options: { quality: primaryFormat.quality },
+                format: targetFormat.format,
+                options: { quality: targetFormat.quality },
               },
             }
           },

@@ -6,6 +6,9 @@ import type {
   ResolvedImageOptimizerConfig,
   ResolvedRegenerateButtonConfig,
 } from './types.js'
+
+const DEFAULT_FORMAT = { format: 'webp' as const, quality: 80 }
+
 const resolveRegenerateButton = (
   value: ImageOptimizerConfig['regenerateButton'],
 ): ResolvedRegenerateButtonConfig => {
@@ -22,15 +25,12 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   clientOptimization: config.clientOptimization ?? true,
   collections: config.collections,
   disabled: config.disabled ?? false,
-  formats: config.formats ?? [
-    { format: 'webp', quality: 80 },
-  ],
+  format: config.format === null ? null : (config.format ?? DEFAULT_FORMAT),
   generateFilename: config.generateFilename,
   generateThumbHash: config.generateThumbHash ?? true,
   maxDimensions: config.maxDimensions ?? { width: 2560, height: 2560 },
   metadataPolicy: config.metadataPolicy,
   regenerateButton: resolveRegenerateButton(config.regenerateButton),
-  replaceOriginal: config.replaceOriginal ?? true,
   responseHeaders: config.responseHeaders ?? false,
   stripMetadata: config.stripMetadata ?? true,
 })
@@ -43,15 +43,13 @@ export const resolveCollectionConfig = (
 
   if (!collectionValue || collectionValue === true) {
     return {
-      formats: resolvedConfig.formats,
+      format: resolvedConfig.format,
       maxDimensions: resolvedConfig.maxDimensions,
-      replaceOriginal: resolvedConfig.replaceOriginal,
     }
   }
 
   return {
-    formats: collectionValue.formats ?? resolvedConfig.formats,
+    format: collectionValue.format ?? resolvedConfig.format,
     maxDimensions: collectionValue.maxDimensions ?? resolvedConfig.maxDimensions,
-    replaceOriginal: collectionValue.replaceOriginal ?? resolvedConfig.replaceOriginal,
   }
 }

@@ -3,11 +3,10 @@ import sharp from 'sharp'
 import type { CollectionBeforeChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
-import { resolveCollectionConfig } from '../defaults.js'
 import { generateThumbHash } from '../processing/index.js'
 
 /**
- * v2 — Config-injection architecture.
+ * Config-injection architecture.
  *
  * Payload's native `generateFileData()` pipeline (driven by
  * `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and
@@ -21,7 +20,9 @@ import { generateThumbHash } from '../processing/index.js'
  *   • the early-bail when Payload is re-fetching its own file for a focal-point
  *     adjustment (no need to re-stamp anything)
  *   • the imageOptimizer status field (originalSize, optimizedSize, status,
- *     thumbHash) and decision of whether an additive multi-format job is needed
+ *     thumbHash)
+ *
+ * Status is always `complete` after this hook runs — no async handoff.
  */
 export const createBeforeChangeHook = (
   resolvedConfig: ResolvedImageOptimizerConfig,
@@ -44,11 +45,8 @@ export const createBeforeChangeHook = (
         originalSize: req.file.data.length,
         optimizedSize: req.file.data.length,
         status: 'complete',
-        variants: [],
         error: null,
       }
-      context.imageOptimizer_hasUpload = true
-      context.imageOptimizer_statusResolved = true
       return data
     }
 
@@ -64,11 +62,8 @@ export const createBeforeChangeHook = (
             originalSize: req.file.data.length,
             optimizedSize: req.file.data.length,
             status: 'complete',
-            variants: [],
             error: null,
           }
-          context.imageOptimizer_hasUpload = true
-          context.imageOptimizer_statusResolved = true
           return data
         }
       } catch {
@@ -124,8 +119,6 @@ export const createBeforeChangeHook = (
       data.filename = newFilename
     }
 
-    const perCollectionConfig = resolveCollectionConfig(resolvedConfig, collectionSlug)
-
     // Original size: captured by beforeOperation hook before generateFileData
     // mutated req.file.size. Falls back to current req.file.size when unavailable
     // (e.g. tests that bypass beforeOperation), in which case originalSize ==
@@ -138,28 +131,18 @@ export const createBeforeChangeHook = (
     // and is the same value, but req.file.data.length is the source of truth.
     const optimizedSize = req.file.data.length
 
-    // Multi-format mode requires the additive convertFormats job to handle
-    // formats[1..N] (formats[0] is already produced natively).
-    const needsAsyncJob = perCollectionConfig.formats.length > 1
-
     data.imageOptimizer = {
       originalSize,
       optimizedSize,
-      status: needsAsyncJob ? 'pending' : 'complete',
-      variants: needsAsyncJob ? undefined : [],
+      status: 'complete',
       error: null,
     }
 
-    // Single-format mode: compute ThumbHash inline so it lands in the initial
-    // DB write (avoids a follow-up update that fails on MongoDB transactions
-    // when cloud storage is involved).
-    if (resolvedConfig.generateThumbHash && !needsAsyncJob) {
+    // Compute ThumbHash inline so it lands in the initial DB write (avoids a
+    // follow-up update that can fail on MongoDB transactions when cloud
+    // storage is involved).
+    if (resolvedConfig.generateThumbHash) {
       data.imageOptimizer.thumbHash = await generateThumbHash(req.file.data)
-    }
-
-    context.imageOptimizer_hasUpload = true
-    if (!needsAsyncJob) {
-      context.imageOptimizer_statusResolved = true
     }
 
     return data
