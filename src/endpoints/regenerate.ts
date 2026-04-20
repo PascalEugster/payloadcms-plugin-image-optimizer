@@ -9,6 +9,35 @@ type StateCollections = Record<string, CollectionState>
 
 const GLOBAL_SLUG = 'image-optimizer-state'
 
+// Serializes read-modify-write on the shared `image-optimizer-state` global
+// within this process, so two concurrent regens on different collections
+// can't clobber each other's `startedAt`/`cancelledAt`. Keyed by anything
+// stable across calls (we use GLOBAL_SLUG since there's exactly one global).
+// Cross-instance races still exist on Fluid Compute but are acceptable given
+// regen is admin-triggered and rare.
+const stateWriteChain = new Map<string, Promise<unknown>>()
+
+// Short-lived per-collection memo for the status endpoint. Polling at 2s
+// with a 5s TTL means ~60% of polls hit memo, and every navigation burst
+// to the Media list collapses to a single DB round-trip.
+type StatusPayload = {
+  collectionSlug: string
+  configured: true
+  total: number
+  complete: number
+  errored: number
+  pending: number
+  cancelled: boolean
+  allowForceAll: boolean
+}
+const STATUS_TTL_MS = 5_000
+const statusMemo = new Map<string, { data: StatusPayload; expiresAt: number; generation: number }>()
+// Monotonic generation counter per slug. Incremented on every invalidation;
+// compared at memo-write time so an in-flight GET whose Promise.all started
+// before a POST/DELETE invalidation can't repopulate the memo with its
+// now-stale snapshot. (Classic CAS-on-version against read-your-write races.)
+const statusGeneration = new Map<string, number>()
+
 async function getCollectionState(payload: any, slug: string): Promise<CollectionState> {
   try {
     const state = await payload.findGlobal({ slug: GLOBAL_SLUG })
@@ -19,15 +48,27 @@ async function getCollectionState(payload: any, slug: string): Promise<Collectio
 }
 
 async function setCollectionState(payload: any, slug: string, update: Partial<CollectionState>): Promise<void> {
-  let existing: StateCollections = {}
-  try {
-    const state = await payload.findGlobal({ slug: GLOBAL_SLUG })
-    existing = (state?.collections as StateCollections) || {}
-  } catch {
-    // Global may not exist yet
-  }
-  existing[slug] = { ...existing[slug], ...update }
-  await payload.updateGlobal({ slug: GLOBAL_SLUG, data: { collections: existing } })
+  const previous = stateWriteChain.get(GLOBAL_SLUG) ?? Promise.resolve()
+  const next = previous.then(async () => {
+    let existing: StateCollections = {}
+    try {
+      const state = await payload.findGlobal({ slug: GLOBAL_SLUG })
+      existing = (state?.collections as StateCollections) || {}
+    } catch {
+      // Global may not exist yet
+    }
+    existing[slug] = { ...existing[slug], ...update }
+    await payload.updateGlobal({ slug: GLOBAL_SLUG, data: { collections: existing } })
+  })
+  // Swallow downstream errors so a failed write doesn't poison later writes
+  // in the chain; the caller's await still surfaces this call's own error.
+  stateWriteChain.set(GLOBAL_SLUG, next.catch(() => {}))
+  await next
+}
+
+function invalidateStatusMemo(slug: string): void {
+  statusMemo.delete(slug)
+  statusGeneration.set(slug, (statusGeneration.get(slug) ?? 0) + 1)
 }
 
 export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerConfig) => {
@@ -58,17 +99,29 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
 
     let queued = 0
 
+    // Queue jobs in bounded-parallel chunks. Sequential `await` per doc made
+    // the POST response scale linearly with collection size — a 1k-image
+    // collection held the admin UI on a spinner for ~30s just queuing. A
+    // chunk size of 25 keeps DB pressure manageable while collapsing the
+    // wall-clock cost by ~25x.
+    const CHUNK_SIZE = 25
+    const queueChunk = async (ids: string[]) => {
+      await Promise.all(
+        ids.map((docId) =>
+          req.payload.jobs.queue({
+            task: 'imageOptimizer_regenerateDocument',
+            input: { collectionSlug, docId },
+          }),
+        ),
+      )
+      queued += ids.length
+    }
+
     if (body.docIds && body.docIds.length > 0) {
       // Regenerate specific documents by ID
-      for (const docId of body.docIds) {
-        await req.payload.jobs.queue({
-          task: 'imageOptimizer_regenerateDocument',
-          input: {
-            collectionSlug,
-            docId: String(docId),
-          },
-        })
-        queued++
+      const ids = body.docIds.map(String)
+      for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+        await queueChunk(ids.slice(i, i + CHUNK_SIZE))
       }
     } else {
       // Find all image documents in the collection
@@ -100,15 +153,9 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
           sort: 'createdAt',
         })
 
-        for (const doc of result.docs) {
-          await req.payload.jobs.queue({
-            task: 'imageOptimizer_regenerateDocument',
-            input: {
-              collectionSlug,
-              docId: String(doc.id),
-            },
-          })
-          queued++
+        const ids = result.docs.map((doc) => String(doc.id))
+        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+          await queueChunk(ids.slice(i, i + CHUNK_SIZE))
         }
 
         hasMore = result.hasNextPage
@@ -117,6 +164,9 @@ export const createRegenerateHandler = (resolvedConfig: ResolvedImageOptimizerCo
     }
 
     req.payload.logger.info(`Image optimizer: queued ${queued} images from '${collectionSlug}' for regeneration`)
+
+    // New batch starts — drop any cached status so the next poll reflects it.
+    invalidateStatusMemo(collectionSlug)
 
     // Clear any previous cancellation and record the start time + batch size
     await setCollectionState(req.payload, collectionSlug, {
@@ -171,32 +221,48 @@ export const createRegenerateStatusHandler = (resolvedConfig: ResolvedImageOptim
       })
     }
 
-    const total = await req.payload.count({
-      collection: collectionSlug as CollectionSlug,
-      where: { mimeType: { contains: 'image/' } },
-    })
+    // Hot path: memoize the full status payload for 5s per collection.
+    // Polling at 2s means ~60% of polls hit memo, and every navigation burst
+    // to the Media list page collapses to a single DB round-trip. TTL is
+    // short enough that users never notice stale pending counts.
+    const memoEntry = statusMemo.get(collectionSlug)
+    if (memoEntry && memoEntry.expiresAt > Date.now()) {
+      return Response.json(memoEntry.data)
+    }
 
-    const complete = await req.payload.count({
-      collection: collectionSlug as CollectionSlug,
-      where: {
-        mimeType: { contains: 'image/' },
-        'imageOptimizer.status': { equals: 'complete' },
-      },
-    })
+    // Capture the generation before reading. If a POST/DELETE invalidates
+    // mid-query (bumping the counter), the post-query memo write will see
+    // a stale generation and skip caching — preventing the "in-flight read
+    // repopulates memo with pre-invalidation snapshot" race.
+    const generation = statusGeneration.get(collectionSlug) ?? 0
 
-    const errored = await req.payload.count({
-      collection: collectionSlug as CollectionSlug,
-      where: {
-        mimeType: { contains: 'image/' },
-        'imageOptimizer.status': { equals: 'error' },
-      },
-    })
+    // Fan out the three count queries + state read in parallel. Previously
+    // sequential: ~4 round-trips of latency per poll. Now ~1 round-trip worth.
+    const [total, complete, errored, collState] = await Promise.all([
+      req.payload.count({
+        collection: collectionSlug as CollectionSlug,
+        where: { mimeType: { contains: 'image/' } },
+      }),
+      req.payload.count({
+        collection: collectionSlug as CollectionSlug,
+        where: {
+          mimeType: { contains: 'image/' },
+          'imageOptimizer.status': { equals: 'complete' },
+        },
+      }),
+      req.payload.count({
+        collection: collectionSlug as CollectionSlug,
+        where: {
+          mimeType: { contains: 'image/' },
+          'imageOptimizer.status': { equals: 'error' },
+        },
+      }),
+      getCollectionState(req.payload, collectionSlug),
+    ])
 
-    // Include cancellation state so the UI can react
-    const collState = await getCollectionState(req.payload, collectionSlug)
     const cancelled = !!(collState.cancelledAt && collState.startedAt && collState.cancelledAt > collState.startedAt)
 
-    return Response.json({
+    const payload: StatusPayload = {
       collectionSlug,
       configured: true,
       total: total.totalDocs,
@@ -205,7 +271,26 @@ export const createRegenerateStatusHandler = (resolvedConfig: ResolvedImageOptim
       pending: total.totalDocs - complete.totalDocs - errored.totalDocs,
       cancelled,
       allowForceAll: resolvedConfig.regenerateButton.allowForceAll,
-    })
+    }
+
+    // Only cache if nothing invalidated the memo while our Promise.all was
+    // in flight. A mismatched generation means a newer write superseded our
+    // snapshot — serve it to this caller (correct by construction, their
+    // read covered the invalidation window) but don't poison the memo.
+    // Safety note: this CAS is correct because Node's single-threaded event
+    // loop guarantees the `.get` check and the `.set` execute without any
+    // synchronous invalidation interleaving. `invalidateStatusMemo` is
+    // purely synchronous, so an async invalidator can only run between
+    // distinct microtasks — not between these two adjacent statements.
+    if ((statusGeneration.get(collectionSlug) ?? 0) === generation) {
+      statusMemo.set(collectionSlug, {
+        data: payload,
+        expiresAt: Date.now() + STATUS_TTL_MS,
+        generation,
+      })
+    }
+
+    return Response.json(payload)
   }
 
   return handler
@@ -232,6 +317,10 @@ export const createCancelHandler = (resolvedConfig: ResolvedImageOptimizerConfig
     await setCollectionState(req.payload, collectionSlug, {
       cancelledAt: Date.now(),
     })
+
+    // The next poll must see `cancelled: true` immediately — don't serve it
+    // a 5s-stale payload from before the DELETE.
+    invalidateStatusMemo(collectionSlug)
 
     req.payload.logger.info(`Image optimizer: cancellation requested for '${collectionSlug}'`)
 
