@@ -111,7 +111,7 @@ export type ImageOptimizerConfig = {
 | `metadataPolicy` | `(args: { metadata, req }) => boolean \| Promise<boolean>` | — | Richer alternative. Passed through as Payload's `withMetadata` callback. Return `true` to keep, `false` to strip. Takes precedence over `stripMetadata`. |
 | `replaceOriginal` | `boolean` | `true` | When true, injects `formatOptions` for the parent file. When false, parent stays in its original format and every configured format lands as an additive variant. |
 | `generateThumbHash` | `boolean` | `true` | Plugin-owned. Runs inline in `beforeChange` for single-format configs; runs inside `convertFormats` job for multi-format configs. |
-| `generateFilename` | `(args: GenerateFilenameArgs) => string` | — | Returns filename **stem** (no extension). Built-ins: `uuidFilename`, `seoFilename`. |
+| `generateFilename` | `(args: GenerateFilenameArgs) => string` | — | Returns filename **stem** (no extension). Built-ins: `uuidFilename`, `seoFilename`. **Incompatible with `clientUploads: true`** — blob pathname is locked at sign time (`@payloadcms/storage-vercel-blob`'s `getClientUploadRoute`); any rename in `beforeChange` would desync DB from blob. With `clientUploads: true`, use `addRandomSuffix: true` on the storage adapter instead. |
 | `clientOptimization` | `boolean` | `true` | Replace the admin upload component with `UploadOptimizer` (Canvas pre-resize). |
 | `regenerateButton` | `boolean \| { enabled?, allowForceAll? }` | `true` | Controls the collection-list regeneration button and whether "Force re-process all" is exposed. |
 | `adminThumbnail` | `'auto' \| string \| function` | `'auto'` | See below. |
@@ -562,7 +562,7 @@ export { maxDuration } from '@inoo-ch/payload-image-optimizer'
 
 ### Vercel Blob body size (4.5MB) and `clientUploads`
 
-Large admin uploads still hit Vercel's serverless body-size limit. Enable `clientUploads` on `@payloadcms/storage-vercel-blob` so the browser uploads directly to Blob (up to 5TB):
+Large admin uploads hit Vercel's 4.5MB serverless body limit. The plugin's default `clientOptimization` (Canvas pre-resize) keeps most photos under the limit without any extra config — prefer that path. `clientUploads: true` on `@payloadcms/storage-vercel-blob` is the escape hatch for non-image or otherwise non-resizable uploads (raw DSLR, video):
 
 ```ts
 vercelBlobStorage({
@@ -572,22 +572,44 @@ vercelBlobStorage({
 })
 ```
 
-### "This blob already exists"
+**What breaks with `clientUploads: true` (Payload + storage-vercel-blob constraint, not plugin-specific):**
 
-With `replaceOriginal: true` (default), the parent filename changes (`photo.jpg` → `photo.webp`). If a blob under the new name exists, Vercel Blob throws. `@payloadcms/storage-vercel-blob` doesn't pass `allowOverwrite`.
+The browser PUTs directly to Blob using a signed URL. The pathname is locked at sign time (`getClientUploadRoute.ts`'s `onBeforeGenerateToken` only decides `addRandomSuffix` / `cacheControlMaxAge` — it cannot mutate the pathname). The metadata POST re-fetches the bytes so server hooks run, but `plugin-cloud-storage`'s `afterChange` hook filters files with `clientUploadContext` set before calling `adapter.handleUpload` (`afterChange.ts`: `.filter((file) => !file.clientUploadContext)`). Net effect:
+
+- `upload.formatOptions` runs in `generateFileData` but the optimized buffer is **discarded** — blob retains the browser's original bytes
+- `upload.resizeOptions` same
+- `generateFilename` runs in `beforeChange` and mutates `data.filename`, but the blob is already at the original pathname → DB/blob desync, 404s
+- Per-size variants (`imageSizes`) **still work** — those go through `generateFileData` + `payloadUploadSizes` and are uploaded server-side via `handleUpload` (separate code path, not filtered by `clientUploadContext`)
+
+**Compatibility matrix:**
+
+| Feature | `clientUploads: false` (default) | `clientUploads: true` |
+|---|---|---|
+| Server-side format conversion on parent | ✅ | ❌ (buffer discarded) |
+| Server-side resize on parent | ✅ | ❌ (buffer discarded) |
+| EXIF strip on parent | ✅ | ❌ |
+| `imageSize` variants (format + resize) | ✅ | ✅ |
+| ThumbHash | ✅ | ✅ (computed from re-fetched buffer) |
+| `uuidFilename` / `seoFilename` / custom `generateFilename` | ✅ | ❌ — do not set; use `addRandomSuffix: true` on the adapter |
+| `addRandomSuffix: true` on storage adapter | ✅ | ✅ |
+| Client-side Canvas pre-resize (`clientOptimization`) | ✅ | ✅ (the one thing that still shrinks the parent) |
+
+### "This blob already exists" (server-side uploads only)
+
+Only applies with `clientUploads: false`. With `replaceOriginal: true` (default), the parent filename changes (`photo.jpg` → `photo.webp`). If a blob under the new name exists, Vercel Blob throws. `@payloadcms/storage-vercel-blob` doesn't pass `allowOverwrite`.
 
 **Fix:** use a filename strategy so names are unique per upload:
 
 ```ts
 imageOptimizer({
   collections: { media: true },
-  generateFilename: uuidFilename,  // or seoFilename
+  generateFilename: uuidFilename,  // or seoFilename (server-side uploads only)
 })
 ```
 
 This fixes both initial uploads and the regeneration task (which also generates a new UUID when re-uploading to cloud storage).
 
-**Alternative:** `addRandomSuffix: true` on the storage adapter — fixes initial uploads only, not regeneration.
+**Alternative:** `addRandomSuffix: true` on the storage adapter — fixes initial uploads only, not regeneration. This is the **only** filename-uniqueness approach that works with `clientUploads: true`.
 
 ## Migration
 

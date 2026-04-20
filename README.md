@@ -23,7 +23,7 @@ Payload already ships with sharp and exposes `formatOptions`, `resizeOptions`, `
 - **ThumbHash blur placeholders** — Tiny base64 hashes generated per image for instant blur-up previews.
 - **Bulk regeneration UI** — One-click reprocess-all or reprocess-unoptimized from the admin, with progress tracking and a REST API.
 - **Optimization status panel** — Admin sidebar showing status, original vs. optimized size, savings %, variant list, and blur preview.
-- **Client-side pre-resize** — Canvas-based resize in the browser before upload, cutting 12MB DSLR photos to ~100–500KB pre-upload (huge win with `clientUploads: true`).
+- **Client-side pre-resize** — Canvas-based resize in the browser before upload, cutting 12MB DSLR photos to ~100–500KB pre-upload. Lets most uploads stay under Vercel's 4.5MB serverless body limit without needing `clientUploads: true` (which breaks server-side format conversion and `seoFilename` — see below).
 - **Filename strategies** — UUID filenames to avoid Vercel Blob "already exists" collisions during regeneration.
 - **Next.js display components** — `<ImageBox>` and `<FadeImage>` wrappers with ThumbHash blur, fade-in, focal point, and a responsive variant loader that serves pre-generated `imageSizes` variants directly (bypassing `/_next/image` re-optimization).
 - **Template integration helper** — `getOptimizedImageProps()` adds ThumbHash + focal point + variant loader to the Payload website template's `<NextImage>` in 3 lines.
@@ -113,7 +113,7 @@ imageOptimizer({
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions. Images are resized to fit within these bounds. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholders for instant image previews. |
 | `stripMetadata` | `boolean` | `true` | Sets `upload.withMetadata: false` AND guarantees sharp runs on every upload (Payload skips sharp entirely when no transform is configured, which preserves EXIF). Use `metadataPolicy` for richer control. |
-| `generateFilename` | `(args) => string` | — | Custom filename **stem** generator. Built-ins: `uuidFilename` (UUID — prevents Vercel Blob "already exists" errors), `seoFilename` (human-readable from alt text). |
+| `generateFilename` | `(args) => string` | — | Custom filename **stem** generator. Built-ins: `uuidFilename` (UUID — prevents Vercel Blob "already exists" errors), `seoFilename` (human-readable from alt text). **Note:** `seoFilename` only works with server-side uploads (Payload default, `clientUploads: false`). With `clientUploads: true` the blob pathname is locked client-side before server hooks run, so `seoFilename` is effectively ignored — use `uuidFilename` instead. See [Filename strategies and client uploads](#filename-strategies-and-client-uploads). |
 | `clientOptimization` | `boolean` | `true` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
 | `regenerateButton` | `boolean \| { enabled?: boolean, allowForceAll?: boolean }` | `true` | Controls the regeneration UI. `false` hides it entirely. Pass an object to opt in to the `Force re-process all` checkbox (`allowForceAll: true`) — off by default so the primary action is always "Regenerate N Unoptimized". |
 | `adminThumbnail` | `'auto' \| string \| function` | `'auto'` | Injects an `upload.adminThumbnail` on each targeted collection. `'auto'` emits a function that returns a URL from `doc.filename` so admin thumbnails survive the v2 parent-extension change (`.jpg` → `.webp`). String mode is treated as a size-name reference; function mode is passed through. Respects user-set values. |
@@ -189,21 +189,50 @@ This sets a 60-second timeout, which is sufficient for most configurations. With
 
 #### Large file uploads with Vercel Blob
 
-Even with `maxDuration` and `bodySizeLimit` configured, large file uploads through the Payload admin still go through the Next.js API route, which hits Vercel's request body size limit (4.5MB on serverless functions). If you're using `@payloadcms/storage-vercel-blob`, enable `clientUploads` to bypass this entirely:
+Even with `maxDuration` and `bodySizeLimit` configured, large file uploads through the Payload admin still go through the Next.js API route, which hits Vercel's request body size limit (4.5MB on serverless functions). The plugin's client-side pre-resize (`clientOptimization`, on by default) keeps most photos under that limit — but raw DSLR RAWs, videos, or other non-resizable media can still exceed it. For those, `@payloadcms/storage-vercel-blob` supports `clientUploads`:
 
 ```ts
 vercelBlobStorage({
   collections: { media: true },
   token: process.env.BLOB_READ_WRITE_TOKEN,
-  clientUploads: true, // uploads go directly from browser to Vercel Blob
+  clientUploads: true, // uploads go directly from browser to Vercel Blob (up to 5TB)
 })
 ```
 
-With `clientUploads: true`, files upload directly from the browser to Vercel Blob (up to 5TB) and the server only handles the small JSON metadata payload. This eliminates body size limit errors regardless of file size.
+**Read this before enabling `clientUploads: true` — it has real trade-offs:**
 
-#### "This blob already exists" error
+With `clientUploads: true`, the browser PUTs the file directly to Vercel Blob using a signed URL. The server never sees the bytes until the metadata POST, at which point the blob already exists under the filename the browser chose. That breaks every server-side transformation that would normally own the filename or the blob contents:
 
-When `replaceOriginal: true` (default), the plugin changes filenames during upload (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass [`allowOverwrite`](https://vercel.com/docs/vercel-blob#overwriting-blobs) to the Vercel Blob SDK.
+| What you lose with `clientUploads: true` | Why |
+|---|---|
+| `seoFilename` | Alt text isn't available at sign time; the pathname is locked before any server hook runs |
+| Server-side format conversion (`upload.formatOptions`) | The optimized buffer is computed but never written — Vercel Blob keeps the browser's original bytes |
+| Server-side resize (`upload.resizeOptions`) | Same reason — server processes the buffer in memory, discards the result |
+| EXIF stripping on the original | Same reason (per-size variants are still stripped, since those run through `generateFileData`) |
+
+This is a Payload + `storage-vercel-blob` architectural constraint, not a plugin limitation — the cloud-storage adapter explicitly skips `handleUpload` when `clientUploadContext` is set.
+
+#### Filename strategies and client uploads
+
+| Upload mode | Works with | Recommended |
+|---|---|---|
+| `clientUploads: false` (Payload default) | `uuidFilename`, `seoFilename`, custom `generateFilename` | `seoFilename` for SEO; `uuidFilename` for immutable caching |
+| `clientUploads: true` | `uuidFilename` via `addRandomSuffix: true` on the storage adapter | `addRandomSuffix: true` — filenames become `photo-a1b2c3.jpg` |
+
+With `clientUploads: true`, your `imageOptimizer({ generateFilename })` is still called (it runs in `beforeChange` like always), but any rename it produces will make `data.filename` diverge from the actual blob pathname — resulting in 404s. So **do not combine `clientUploads: true` with `generateFilename`**. Use the storage adapter's `addRandomSuffix` instead:
+
+```ts
+vercelBlobStorage({
+  collections: { media: true },
+  token: process.env.BLOB_READ_WRITE_TOKEN,
+  clientUploads: true,
+  addRandomSuffix: true, // photo.jpg → photo-a1b2c3.jpg (added at sign time, client is told the final name)
+})
+```
+
+#### "This blob already exists" error (server-side uploads only)
+
+This only applies when `clientUploads` is **off** (the default). With `replaceOriginal: true` (also default), the plugin changes filenames during upload (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass [`allowOverwrite`](https://vercel.com/docs/vercel-blob#overwriting-blobs) to the Vercel Blob SDK.
 
 **Fix:** Set `generateFilename: uuidFilename` — replaces original filenames with UUIDs before the storage adapter sees them:
 
@@ -218,16 +247,7 @@ imageOptimizer({
 
 This prevents collisions on both initial uploads and bulk regeneration (the regeneration task also generates a new UUID for cloud storage re-uploads). Payload stores the full URL in the database, so UUID filenames are transparent to your application.
 
-**Alternative:** If you prefer to keep original filenames, set `addRandomSuffix: true` on the storage adapter instead:
-
-```ts
-vercelBlobStorage({
-  collections: { media: true },
-  token: process.env.BLOB_READ_WRITE_TOKEN,
-  clientUploads: true,
-  addRandomSuffix: true,
-})
-```
+**Prefer human-readable names?** `generateFilename: seoFilename` slugifies the alt text (e.g., `Edelstahl Geländer` → `edelstahl-gelaender-1745123456.webp`). Only works with server-side uploads.
 
 ## How It Differs from Payload's Default Image Handling
 
