@@ -274,7 +274,7 @@ Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) and exposes eve
 - **Single-pass pipeline** — Metadata stripping, resize, and format conversion run in Payload's single sharp pipeline — one decode/encode cycle.
 - **ThumbHash** — One additional sharp pass (100×100 raw buffer) per upload. Negligible.
 - **No background jobs on upload** — As of v3, every upload resolves synchronously. The only async workload is bulk regeneration (which only runs when you click it).
-- **Bulk regeneration** processes images sequentially, not all at once, so it won't spike your server.
+- **Bulk regeneration** runs in parallel waves — 20 images per wave by default — on a dedicated `image-optimizer` job queue that doesn't interfere with other consumers of Payload's default queue. The POST endpoint returns immediately after queueing; progress happens in the background (`waitUntil` on Vercel, or Payload autorun on hosts that have it configured). Each run respects a 270-second wall-clock budget so serverless timeouts don't cut off jobs mid-upload — anything still pending when the budget exhausts stays queued for autorun or the next regenerate click (which only picks up still-pending docs).
 
 ## Admin UI
 

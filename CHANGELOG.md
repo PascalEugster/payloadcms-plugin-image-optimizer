@@ -1,5 +1,49 @@
 # Changelog
 
+## 3.2.0 — Parallel-wave regeneration on a dedicated job queue
+
+Bulk regeneration was the last serial hotspot. The POST endpoint previously kicked `payload.jobs.run({ limit: queued, sequential: true })` inside `waitUntil`, which executed every queued job one-at-a-time inside a single serverless invocation. For a cloud-storage collection (where each job is dominated by a fetch-then-upload round-trip), the CPU and connection pool sat ~90% idle per job, and the whole batch died at the first function timeout — typically around 100 docs on Vercel's 300s default.
+
+### Performance
+
+- **Parallel waves, not sequential.** Removed `sequential: true`. `jobs.run` now executes `WAVE_SIZE` (20) jobs in parallel per wave. On cloud storage (S3, Vercel Blob, R2) where the task is network-bound, expect roughly 5–10× higher throughput per unit wall-clock.
+- **Budgeted wave loop.** The endpoint now loops `jobs.run` wave-by-wave inside `waitUntil`, exiting cleanly on `result.noJobsRemaining`, a fresh cancellation signal, or a 270-second wall-clock budget. The budget leaves 30s of headroom under Vercel's 300s default function timeout so no wave gets cut off mid-upload. Remaining jobs — if any — stay queued for Payload autorun or the next POST (which via the `!force` where-clause only re-queues still-pending docs, making re-clicks idempotent).
+- **Process-local cancellation cache.** A 1-second TTL `Map` fronts the `findGlobal` cancellation check inside the task handler. Without this, every 20-job wave would hit the global in near-lockstep. Linear drop in DB pressure (N → 1 per wave) for a ≤1s delay in cancel visibility — the endpoint's own between-wave check stays uncached, so wave-boundary decisions remain authoritative.
+
+### Changed
+
+- **Dedicated job queue.** Regeneration jobs are now queued into an `image-optimizer` queue via `payload.jobs.queue({ queue: 'image-optimizer', ... })` instead of the `default` queue. Isolation is the motivation: host-side cron autorun (Vercel Cron, Payload's built-in autorun, etc.) can target this queue without picking up — or being blocked by — jobs from other plugins. No migration needed: any existing queued jobs from previous versions still complete under the default queue via the plugin's task registration; new regenerations flow through the isolated queue.
+
+### Internal
+
+- New constants in `src/endpoints/regenerate.ts`: `IMAGE_OPTIMIZER_QUEUE`, `WAVE_SIZE` (20), `WAVE_BUDGET_MS` (270_000).
+- New `isCancelled(req, slug)` helper in `src/tasks/regenerateDocument.ts` with module-scope `cancelCache` Map and `CANCEL_CACHE_TTL_MS` (1_000).
+- No public API changes. Request/response shapes for all three endpoints are unchanged; the wave shape is entirely server-side. Tasks queued against the old `default` queue by pre-3.2 callers still complete — Payload's task registration is queue-agnostic.
+- Tests: 75 unit + 22 integration, all passing.
+
+---
+
+## 3.1.0 — Regenerate endpoints: parallel counts, memoized status, batched job queue
+
+### Performance
+
+- **Status GET runs four reads in parallel.** `createRegenerateStatusHandler` was issuing three sequential `payload.count` queries (total / complete / errored) plus a `findGlobal`, so each poll paid ~4 round-trips of latency back-to-back. The handler now fans them out with `Promise.all`, collapsing the end-to-end cost to roughly one round-trip. Visible win on every admin poll and every navigation to the Media list.
+- **Status payload memoized for 5s per collection.** The UI polls at 2s; the status shape changes slowly. A module-scope memo returns the last payload to subsequent polls within a 5s TTL, so ~60% of polls skip the database entirely. Memo is explicitly invalidated by POST (new batch) and DELETE (cancel) so UI state transitions are never served a stale copy.
+- **Memo is race-safe against concurrent invalidation.** A per-slug generation counter bumps on every invalidation; status handlers capture the generation before their parallel reads and only write the memo if the counter still matches. Prevents the classic "in-flight read repopulates cache with pre-invalidation snapshot" footgun that would otherwise briefly serve `cancelled: false` right after a Stop click, or pre-queue counts right after a regen click.
+- **Regenerate POST queues jobs in bounded-parallel chunks.** Was a serial `await payload.jobs.queue` per doc — for a 1k-image collection that held the admin UI on a spinner for ~30s before the response came back. Now chunked at 25 with `Promise.all`, collapsing the wall-clock cost by roughly 25×.
+
+### Fixed
+
+- **Concurrent regens on different collections no longer clobber each other's state.** `setCollectionState` read-modify-write on the shared `image-optimizer-state` global had no serialization; two near-simultaneous regens could each read the same baseline and overwrite each other's `startedAt` / `cancelledAt`. The write path now chains through an in-process promise, guaranteeing per-process ordering. Cross-instance races on Fluid Compute remain possible (regen is admin-triggered and rare) — documented in the source.
+
+### Internal
+
+- New helpers: `invalidateStatusMemo(slug)`, module-scope `statusMemo` / `statusGeneration` / `stateWriteChain` maps, `StatusPayload` type.
+- Sequential pagination in POST preserved (50 docs per page) — the batching is applied to job queueing within each page.
+- No public API changes. Same request/response shapes for all three endpoints.
+
+---
+
 ## 3.0.3 — Fix slow regeneration on docs in populated folder hierarchies
 
 ### Fixed

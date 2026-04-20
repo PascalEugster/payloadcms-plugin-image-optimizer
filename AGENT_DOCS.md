@@ -67,7 +67,7 @@ Hooks registered on each targeted collection:
 
 Other plugin-owned surfaces:
 
-- One Payload job task: `imageOptimizer_regenerateDocument` (`retries: 2`) — only runs when the regenerate button fires.
+- One Payload job task: `imageOptimizer_regenerateDocument` (`retries: 2`), queued into a dedicated `image-optimizer` queue so host cron autorun can target it without interfering with the `default` queue. Only runs when the regenerate button fires.
 - Three REST endpoints at `/api/image-optimizer/regenerate` (POST/GET/DELETE).
 - An `image-optimizer-state` hidden global (stores per-collection `startedAt`, `cancelledAt`, `queued`).
 - Injected admin components: `UploadOptimizer` (replacing the default upload component when `clientOptimization` is on) and `RegenerationButton` (beforeListTable, when `regenerateButton.enabled`).
@@ -295,9 +295,10 @@ Request body:
 - `force` is coerced to `false` server-side unless `regenerateButton.allowForceAll` is true.
 - With `docIds`: queues one `imageOptimizer_regenerateDocument` per ID (no pagination).
 - Without `docIds`: paginates `payload.find` (50 per page, `sort: 'createdAt'`, `depth: 0`). Query is `{ mimeType: { contains: 'image/' } }` plus a status filter (`not_equals: 'complete'` OR `exists: false`) unless `force` is true.
+- Jobs are queued into a dedicated `image-optimizer` queue (via `payload.jobs.queue({ queue: 'image-optimizer', ... })`) — not the `default` queue. This isolates regen from other plugins' cron autorun and lets you target this queue from a host-side scheduler if you want.
 - Writes `{ startedAt: Date.now(), cancelledAt: undefined, queued }` to the `image-optimizer-state` global for this slug.
-- Kicks `payload.jobs.run({ limit: queued, sequential: true })` through `waitUntil`.
-- Response: `{ queued: number, collectionSlug: string }`.
+- Kicks a **wave loop** inside `waitUntil` (so jobs progress past the response on Vercel/serverless without a separate cron runner): each wave runs `payload.jobs.run({ queue: 'image-optimizer', limit: 20 })` — parallel by default (`sequential` omitted). The loop repeats until `result.noJobsRemaining === true`, a cancellation signal is observed, or the 270-second wall-clock budget is exceeded (leaves a 30s buffer under Vercel's 300s default function timeout). If the budget exhausts, remaining jobs stay queued — Payload autorun (if configured) picks them up; otherwise the next POST re-queues only the still-pending docs (the `!force` where-clause excludes `'complete'`).
+- Response: `{ queued: number, collectionSlug: string }` — returns immediately after queueing, before any wave has finished running.
 
 ### `GET /api/image-optimizer/regenerate?collection=<slug>`
 
@@ -404,11 +405,29 @@ await payload.update({
 
 ## Background Jobs
 
-One Payload job task is registered (`retries: 2`):
+One Payload job task is registered (`retries: 2`), queued into a dedicated `image-optimizer` queue (not `default`):
 
-| Slug | Input | Output | Trigger | Purpose |
-|------|-------|--------|---------|---------|
-| `imageOptimizer_regenerateDocument` | `{ collectionSlug, docId }` | `{ status: string, reason?: string }` | Regenerate endpoint | Fully re-optimize one doc by re-triggering the native pipeline via `payload.update({ file })` with `context.imageOptimizer_regenerating = true`. Generates a new filename when a filename strategy is active. |
+| Slug | Queue | Input | Output | Trigger | Purpose |
+|------|-------|-------|--------|---------|---------|
+| `imageOptimizer_regenerateDocument` | `image-optimizer` | `{ collectionSlug, docId }` | `{ status: 'complete' \| 'skipped' \| 'cancelled', reason?: string }` | Regenerate endpoint | Fully re-optimize one doc by re-triggering the native pipeline via `payload.update({ file })` with `context.imageOptimizer_regenerating = true`. Generates a new filename when a filename strategy is active. |
+
+### Execution model
+
+- **Parallel waves, not sequential.** The POST endpoint runs `payload.jobs.run({ queue: 'image-optimizer', limit: WAVE_SIZE })` in a loop inside `waitUntil`. `WAVE_SIZE` is 20 by default. Each wave runs in parallel (`sequential` omitted — Payload's default).
+- **Budgeted.** The loop exits cleanly after `WAVE_BUDGET_MS` (270s, chosen to leave 30s headroom under Vercel's 300s default function timeout). Remaining jobs stay in the queue for Payload autorun or the next POST.
+- **Cancellation.** Between waves, the endpoint reads the `image-optimizer-state` global and aborts if `cancelledAt > startedAt`. Inside a wave, each task also runs an `isCancelled()` check with a 1-second process-local cache so 20 parallel jobs don't all hit `findGlobal` simultaneously.
+- **Cooperative with host autorun.** The dedicated queue means you can wire a host-side scheduler (e.g. Vercel Cron calling `payload.jobs.run({ queue: 'image-optimizer' })`) without interfering with other consumers of the `default` queue — and without double-running because Payload's job lock prevents concurrent execution of the same job row.
+
+### Task handler behavior
+
+- **Cancellation check first** (cached). Returns `{ status: 'cancelled', reason: 'user-cancelled' }`.
+- **`findByID` with `depth: 0`** — scalar fields only. Avoids pulling populated folder trees on every job (observed 4–8s savings per job on folder-heavy collections).
+- **NotFound (HTTP 404) is terminal** — a doc deleted between queue and run returns `{ status: 'skipped', reason: 'doc-deleted' }` instead of throwing, so Payload doesn't retry. Same guard in the outer catch for mid-flight deletions.
+- **Non-image docs** are skipped (`{ status: 'skipped', reason: 'not-image' }`).
+- **`fetchFileBuffer`** reads from local disk when the collection has `disableLocalStorage: false`; falls back to fetching `doc.url` (with 30s timeout) for cloud storage.
+- **`payload.update({ file })` with `depth: 0`** — re-runs `generateFileData` through the injected `formatOptions`/`resizeOptions`/`withMetadata`; `beforeChange` re-stamps `imageOptimizer.{originalSize, optimizedSize, status, thumbHash}`. `overwriteExistingFiles: true` prevents a filename suffix on the rewrite. `context.imageOptimizer_regenerating: true` tells `beforeChange` this is an explicit regeneration, not a native focal-point re-upload.
+- **Carries forward** `doc.imageOptimizer.originalSize` on the `data` payload so regenerations don't collapse the "saved X%" metric toward zero over repeated runs.
+- **On error** (non-NotFound): writes `imageOptimizer.status = 'error'` with the message (via `context.imageOptimizer_skip: true` so `beforeChange` doesn't fire on the writeback), then rethrows so Payload's retry machinery observes the failure.
 
 Upload path has **no jobs** — everything resolves synchronously in `beforeChange`.
 

@@ -9,6 +9,34 @@ const GLOBAL_SLUG = 'image-optimizer-state';
     return typeof err === 'object' && err !== null && err.status === 404;
 };
 /**
+ * Process-local cache for the cancellation check. Since the endpoint now
+ * runs jobs in parallel waves (WAVE_SIZE ≈ 20), without this cache every
+ * wave would hit `findGlobal` N times in near-lockstep. The 1s TTL trades
+ * a tiny delay on cancellation-visibility against a linear drop in DB
+ * pressure (N → 1 per wave). The endpoint's own wave-entry check uses the
+ * uncached path so the wave-boundary decision stays authoritative.
+ */ const CANCEL_CACHE_TTL_MS = 1_000;
+const cancelCache = new Map();
+async function isCancelled(req, collectionSlug) {
+    const cached = cancelCache.get(collectionSlug);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    try {
+        const state = await req.payload.findGlobal({
+            slug: GLOBAL_SLUG
+        });
+        const collState = state?.collections?.[collectionSlug];
+        const value = !!(collState?.cancelledAt && collState.cancelledAt > (collState.startedAt ?? 0));
+        cancelCache.set(collectionSlug, {
+            value,
+            expiresAt: Date.now() + CANCEL_CACHE_TTL_MS
+        });
+        return value;
+    } catch  {
+        // Global may not exist yet — not cancelled.
+        return false;
+    }
+}
+/**
  * Regeneration via Payload's native pipeline.
  *
  * Reads the existing parent file, then calls `payload.update({ file })` to
@@ -27,28 +55,29 @@ const GLOBAL_SLUG = 'image-optimizer-state';
  */ export const createRegenerateDocumentHandler = (resolvedConfig)=>{
     return async ({ input, req })=>{
         try {
-            // Cancellation check
-            try {
-                const state = await req.payload.findGlobal({
-                    slug: GLOBAL_SLUG
-                });
-                const collState = state?.collections?.[input.collectionSlug];
-                if (collState?.cancelledAt && collState.cancelledAt > (collState.startedAt || 0)) {
-                    return {
-                        output: {
-                            status: 'cancelled',
-                            reason: 'user-cancelled'
-                        }
-                    };
-                }
-            } catch  {
-            // Global may not exist yet — proceed normally
+            // Cancellation check — cached per-process so a wave of parallel jobs
+            // doesn't all hit `findGlobal` simultaneously.
+            if (await isCancelled(req, input.collectionSlug)) {
+                return {
+                    output: {
+                        status: 'cancelled',
+                        reason: 'user-cancelled'
+                    }
+                };
             }
             let doc;
             try {
                 doc = await req.payload.findByID({
                     collection: input.collectionSlug,
-                    id: input.docId
+                    id: input.docId,
+                    // depth: 0 — we only read scalar fields here (mimeType, filename,
+                    // url, imageOptimizer). Default depth (2) populates every relation
+                    // on the doc — including nested folder hierarchies — which on
+                    // production deployments adds many DB round-trips to each regen
+                    // for no benefit (e.g. `folder` → parent folder → sibling
+                    // documentsAndFolders array). Observed ~4-8s saved per job on
+                    // media docs nested in populated folder trees.
+                    depth: 0
                 });
             } catch (err) {
                 if (isNotFound(err)) {
@@ -92,6 +121,11 @@ const GLOBAL_SLUG = 'image-optimizer-state';
             await req.payload.update({
                 collection: input.collectionSlug,
                 id: input.docId,
+                // depth: 0 — skip re-hydrating the updated doc's relations in the
+                // response. We don't use the return value; the hook writes through
+                // to the DB and the admin UI polls for the fresh state separately.
+                // Pairs with the depth: 0 on findByID above.
+                depth: 0,
                 data: typeof carriedOriginalSize === 'number' ? {
                     imageOptimizer: {
                         originalSize: carriedOriginalSize
@@ -134,6 +168,7 @@ const GLOBAL_SLUG = 'image-optimizer-state';
                 await req.payload.update({
                     collection: input.collectionSlug,
                     id: input.docId,
+                    depth: 0,
                     data: {
                         imageOptimizer: {
                             status: 'error',

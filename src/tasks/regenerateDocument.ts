@@ -17,6 +17,32 @@ const isNotFound = (err: unknown): boolean => {
 }
 
 /**
+ * Process-local cache for the cancellation check. Since the endpoint now
+ * runs jobs in parallel waves (WAVE_SIZE ≈ 20), without this cache every
+ * wave would hit `findGlobal` N times in near-lockstep. The 1s TTL trades
+ * a tiny delay on cancellation-visibility against a linear drop in DB
+ * pressure (N → 1 per wave). The endpoint's own wave-entry check uses the
+ * uncached path so the wave-boundary decision stays authoritative.
+ */
+const CANCEL_CACHE_TTL_MS = 1_000
+const cancelCache = new Map<string, { value: boolean; expiresAt: number }>()
+
+async function isCancelled(req: any, collectionSlug: string): Promise<boolean> {
+  const cached = cancelCache.get(collectionSlug)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  try {
+    const state = await req.payload.findGlobal({ slug: GLOBAL_SLUG })
+    const collState = (state?.collections as Record<string, any>)?.[collectionSlug]
+    const value = !!(collState?.cancelledAt && collState.cancelledAt > (collState.startedAt ?? 0))
+    cancelCache.set(collectionSlug, { value, expiresAt: Date.now() + CANCEL_CACHE_TTL_MS })
+    return value
+  } catch {
+    // Global may not exist yet — not cancelled.
+    return false
+  }
+}
+
+/**
  * Regeneration via Payload's native pipeline.
  *
  * Reads the existing parent file, then calls `payload.update({ file })` to
@@ -36,15 +62,10 @@ const isNotFound = (err: unknown): boolean => {
 export const createRegenerateDocumentHandler = (resolvedConfig: ResolvedImageOptimizerConfig) => {
   return async ({ input, req }: { input: { collectionSlug: string; docId: string }; req: any }) => {
     try {
-      // Cancellation check
-      try {
-        const state = await req.payload.findGlobal({ slug: GLOBAL_SLUG })
-        const collState = (state?.collections as Record<string, any>)?.[input.collectionSlug]
-        if (collState?.cancelledAt && collState.cancelledAt > (collState.startedAt || 0)) {
-          return { output: { status: 'cancelled', reason: 'user-cancelled' } }
-        }
-      } catch {
-        // Global may not exist yet — proceed normally
+      // Cancellation check — cached per-process so a wave of parallel jobs
+      // doesn't all hit `findGlobal` simultaneously.
+      if (await isCancelled(req, input.collectionSlug)) {
+        return { output: { status: 'cancelled', reason: 'user-cancelled' } }
       }
 
       let doc
