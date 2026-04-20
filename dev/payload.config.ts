@@ -83,13 +83,10 @@ const buildConfigWithMemoryDB = async () => {
           media: true,
           avatars: {
             maxDimensions: { width: 256, height: 256 },
-            formats: [{ format: 'webp', quality: 90 }],
+            format: { format: 'webp', quality: 90 },
           },
         },
-        formats: [
-          { format: 'webp', quality: 80 },
-          { format: 'avif', quality: 65 },
-        ],
+        format: { format: 'webp', quality: 80 },
         maxDimensions: { width: 2560, height: 2560 },
         stripMetadata: true,
         generateThumbHash: true,

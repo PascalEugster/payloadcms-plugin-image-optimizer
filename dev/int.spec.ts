@@ -83,17 +83,18 @@ describe('Image Optimizer Plugin', () => {
     expect(doc.imageOptimizer).toBeDefined()
     expect(doc.imageOptimizer.originalSize).toBeGreaterThan(0)
     expect(doc.imageOptimizer.optimizedSize).toBeGreaterThan(0)
-    // v2: originalSize is captured by the beforeOperation hook before Payload
+    // originalSize is captured by the beforeOperation hook before Payload
     // mutates req.file. Optimization should produce a smaller file.
     expect(doc.imageOptimizer.optimizedSize).toBeLessThan(doc.imageOptimizer.originalSize)
-    expect(doc.imageOptimizer.status).toBe('pending')
+    // v3: beforeChange resolves status synchronously — no pending state.
+    expect(doc.imageOptimizer.status).toBe('complete')
 
     // Verify the saved file was resized within max dimensions
     const savedPath = path.resolve(dirname, 'media', doc.filename as string)
     const metadata = await sharp(savedPath).metadata()
     expect(metadata.width).toBeLessThanOrEqual(2560)
     expect(metadata.height).toBeLessThanOrEqual(2560)
-    // v2: replaceOriginal + formats[0] = webp → parent file is webp natively
+    // Format conversion: parent file is webp via Payload's upload.formatOptions
     expect(metadata.format).toBe('webp')
     expect(doc.mimeType).toBe('image/webp')
     expect(doc.filename).toMatch(/\.webp$/)
@@ -168,166 +169,13 @@ describe('Image Optimizer Plugin', () => {
       },
     })
 
-    // ThumbHash is computed in the background (deferred from the sync save path).
-    // Wait for the background job/waitUntil to complete, then re-fetch.
-    await payload.jobs.run()
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    // v3: ThumbHash is computed inline in beforeChange — available immediately.
+    expect(doc.imageOptimizer.thumbHash).toBeDefined()
+    expect(typeof doc.imageOptimizer.thumbHash).toBe('string')
+    expect(doc.imageOptimizer.thumbHash.length).toBeGreaterThan(0)
 
-    const updatedDoc = await payload.findByID({ collection: 'media', id: doc.id })
-
-    expect(updatedDoc.imageOptimizer.thumbHash).toBeDefined()
-    expect(typeof updatedDoc.imageOptimizer.thumbHash).toBe('string')
-    expect(updatedDoc.imageOptimizer.thumbHash.length).toBeGreaterThan(0)
-
-    // Verify it's valid base64 that decodes without error
-    const decoded = Buffer.from(updatedDoc.imageOptimizer.thumbHash, 'base64')
+    const decoded = Buffer.from(doc.imageOptimizer.thumbHash, 'base64')
     expect(decoded.length).toBeGreaterThan(0)
-  })
-
-  test('should generate format variants via async job', async () => {
-    const buffer = await createTestImage(400, 300)
-
-    const doc = await payload.create({
-      collection: 'media',
-      data: {},
-      file: {
-        data: buffer,
-        mimetype: 'image/jpeg',
-        name: 'test-variants.jpg',
-        size: buffer.length,
-      },
-    })
-
-    // Wait for the async job to process
-    await payload.jobs.run()
-
-    // Give a moment for the update to complete
-    await new Promise((resolve) => setTimeout(resolve, 500))
-
-    const updatedDoc = await payload.findByID({
-      collection: 'media',
-      id: doc.id,
-    })
-
-    expect(updatedDoc.imageOptimizer.status).toBe('complete')
-
-    // With replaceOriginal: true (default), the main file is already webp (first format).
-    // Only remaining formats (avif) appear as variants.
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
-    expect(updatedDoc.mimeType).toBe('image/webp')
-
-    const avifVariant = updatedDoc.imageOptimizer.variants.find(
-      (v: any) => v.format === 'avif',
-    )
-
-    expect(avifVariant).toBeDefined()
-    expect(avifVariant.mimeType).toBe('image/avif')
-    expect(avifVariant.filesize).toBeGreaterThan(0)
-
-    // Verify variant file exists on disk
-    const mediaDir = path.resolve(dirname, 'media')
-    const avifExists = await fs.access(path.join(mediaDir, avifVariant.filename)).then(() => true).catch(() => false)
-
-    expect(avifExists).toBe(true)
-  })
-
-  test('should regenerate additive variants after focal-point change (native reupload)', async () => {
-    // Regression harness for the staleness bug: when Payload's shouldReupload()
-    // re-runs its pipeline after a focal-point change, the parent + sizes get
-    // regenerated with the new crop, but additive variants (e.g. AVIF sibling)
-    // previously stayed stamped from the pre-change crop because afterChange
-    // short-circuited on `imageOptimizer_nativeReupload`.
-    const buffer = await createTestImage(400, 300)
-
-    const doc = await payload.create({
-      collection: 'media',
-      data: {},
-      file: {
-        data: buffer,
-        mimetype: 'image/jpeg',
-        name: 'test-focal-reupload.jpg',
-        size: buffer.length,
-      },
-    })
-
-    await payload.jobs.run()
-    await new Promise((resolve) => setTimeout(resolve, 500))
-
-    const initialDoc = await payload.findByID({ collection: 'media', id: doc.id })
-    expect(initialDoc.imageOptimizer.status).toBe('complete')
-    const initialVariants = initialDoc.imageOptimizer.variants as Array<{
-      filename: string
-      format: string
-    }>
-    const initialAvif = initialVariants.find((v) => v.format === 'avif')
-    expect(initialAvif).toBeDefined()
-
-    const mediaDir = path.resolve(dirname, 'media')
-    const variantPath = path.join(mediaDir, initialAvif!.filename)
-    const initialStat = await fs.stat(variantPath)
-
-    // Ensure measurable mtime delta on coarse filesystems.
-    await new Promise((resolve) => setTimeout(resolve, 1100))
-
-    // Update focalX/focalY to trigger Payload's shouldReupload() path.
-    //
-    // Payload's reupload logic is finicky in the local-API context:
-    //   1. `generateFileData` only re-fetches the stored file when
-    //      `shouldReupload(uploadEdits, data)` returns true AND the incoming
-    //      `data` carries the doc's current filename/url (used as the source
-    //      of the re-fetched bytes).
-    //   2. `shouldReupload` compares `uploadEdits.focalPoint` against
-    //      `data.focalX/Y`. When they agree, no reupload fires.
-    //   3. The browser admin UI achieves asymmetric values by sending the NEW
-    //      focal in `?uploadEdits=...` while the body still carries the OLD
-    //      `focalX/Y` from `originalDoc` — a legitimate reupload signal.
-    //
-    // Mirroring (3) here: we pass the NEW focal via `req.query.uploadEdits`
-    // but keep `data.focalX/Y` at their stored (50, 50) values.
-    await payload.update({
-      collection: 'media',
-      id: doc.id,
-      data: {
-        filename: initialDoc.filename,
-        url: initialDoc.url,
-        focalX: (initialDoc as any).focalX ?? 50,
-        focalY: (initialDoc as any).focalY ?? 50,
-      } as any,
-      req: {
-        query: { uploadEdits: { focalPoint: { x: 25, y: 75 } } },
-      } as any,
-    })
-
-    // Allow the queued convertFormats job + waitUntil promise to complete.
-    await payload.jobs.run()
-    await new Promise((resolve) => setTimeout(resolve, 500))
-
-    const updatedDoc = await payload.findByID({ collection: 'media', id: doc.id })
-
-    // Status cycled through pending → complete again, meaning convertFormats
-    // was re-invoked after the focal-point change.
-    expect(updatedDoc.imageOptimizer.status).toBe('complete')
-
-    const updatedVariants = updatedDoc.imageOptimizer.variants as Array<{
-      filename: string
-      format: string
-    }>
-    const updatedAvif = updatedVariants.find((v) => v.format === 'avif')
-    expect(updatedAvif).toBeDefined()
-    // Filename stems off doc.filename (same across updates), so the same
-    // variant path is rewritten rather than orphaned.
-    expect(updatedAvif!.filename).toBe(initialAvif!.filename)
-
-    // The variant was rewritten: mtime advanced relative to the pre-change
-    // snapshot. This is the cheapest signal available in the local harness
-    // — full pixel comparison would require a non-constant source image.
-    const updatedStat = await fs.stat(variantPath)
-    expect(updatedStat.mtimeMs).toBeGreaterThan(initialStat.mtimeMs)
-
-    // Sanity: the focal point on the parent doc really did change, confirming
-    // the reupload path was taken.
-    expect(updatedDoc.focalX).toBe(25)
-    expect(updatedDoc.focalY).toBe(75)
   })
 
   test('avatars collection should use custom maxDimensions', async () => {
@@ -355,7 +203,7 @@ describe('Image Optimizer Plugin', () => {
     expect(metadata.height).toBe(192)
   })
 
-  test('avatars collection should only generate webp variant (custom formats)', async () => {
+  test('avatars collection uses per-collection format (webp)', async () => {
     const buffer = await createTestImage(400, 300)
 
     const doc = await payload.create({
@@ -369,21 +217,11 @@ describe('Image Optimizer Plugin', () => {
       },
     })
 
-    await payload.jobs.run()
-    await new Promise((resolve) => setTimeout(resolve, 500))
-
-    const updatedDoc = await payload.findByID({
-      collection: 'avatars',
-      id: doc.id,
-    })
-
-    // With replaceOriginal: true (default) and formats: [webp], the main file
-    // is already webp. No additional variants are generated (formats.slice(1) = []).
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(0)
-    expect(updatedDoc.mimeType).toBe('image/webp')
+    expect(doc.imageOptimizer.status).toBe('complete')
+    expect(doc.mimeType).toBe('image/webp')
   })
 
-  test('media collection with `true` should use global defaults (both formats)', async () => {
+  test('media collection with `true` uses global format default (webp)', async () => {
     const buffer = await createTestImage(400, 300)
 
     const doc = await payload.create({
@@ -397,20 +235,8 @@ describe('Image Optimizer Plugin', () => {
       },
     })
 
-    await payload.jobs.run()
-    await new Promise((resolve) => setTimeout(resolve, 500))
-
-    const updatedDoc = await payload.findByID({
-      collection: 'media',
-      id: doc.id,
-    })
-
-    // With replaceOriginal: true (default), main file is webp. Only avif is a variant.
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
-    expect(updatedDoc.mimeType).toBe('image/webp')
-
-    const formats = updatedDoc.imageOptimizer.variants.map((v: any) => v.format)
-    expect(formats).toContain('avif')
+    expect(doc.imageOptimizer.status).toBe('complete')
+    expect(doc.mimeType).toBe('image/webp')
   })
 
   test('should accept SVG upload without crashing and mark status complete with no conversion', async () => {
@@ -446,7 +272,6 @@ describe('Image Optimizer Plugin', () => {
     expect(doc.imageOptimizer).toBeDefined()
     expect(doc.imageOptimizer.status).toBe('complete')
     expect(doc.imageOptimizer.originalSize).toBe(doc.imageOptimizer.optimizedSize)
-    expect(doc.imageOptimizer.variants).toEqual([])
   })
 
   test('should handle zero-byte buffer without crashing the plugin', async () => {
@@ -536,9 +361,7 @@ describe('Image Optimizer Plugin', () => {
     expect(updatedDoc.imageOptimizer.thumbHash.length).toBeGreaterThan(0)
     expect(updatedDoc.imageOptimizer.originalSize).toBeGreaterThan(0)
     expect(updatedDoc.imageOptimizer.optimizedSize).toBeGreaterThan(0)
-    // replaceOriginal: true → main file is webp, only avif is a variant
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(1)
-    expect(updatedDoc.imageOptimizer.variants[0].format).toBe('avif')
+    expect(updatedDoc.mimeType).toBe('image/webp')
   })
 
   test('should skip non-image documents during regeneration', async () => {
@@ -574,7 +397,7 @@ describe('Image Optimizer Plugin', () => {
         media: true,
         avatars: {
           maxDimensions: { width: 256, height: 256 },
-          formats: [{ format: 'webp', quality: 90 }],
+          format: { format: 'webp', quality: 90 },
         },
       },
     })
@@ -676,8 +499,6 @@ describe('Image Optimizer Plugin', () => {
 
     const updatedDoc = await payload.findByID({ collection: 'avatars', id: doc.id })
     expect(updatedDoc.imageOptimizer.status).toBe('complete')
-    // replaceOriginal: true + formats: [webp] → main file is webp, no additional variants
-    expect(updatedDoc.imageOptimizer.variants).toHaveLength(0)
     expect(updatedDoc.mimeType).toBe('image/webp')
 
     // Verify file was resized
