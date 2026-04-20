@@ -1,6 +1,8 @@
 # @inoo-ch/payload-image-optimizer
 
-Agent-oriented reference for v2.0.0. This file is the deeper companion to `README.md` — for the prose introduction and comparison tables, read the README first. This document focuses on the facts an LLM needs when wiring the plugin into a Payload CMS 3.x codebase or debugging its behavior.
+Agent-oriented reference for v3.0.0. This file is the deeper companion to `README.md` — for the prose introduction and comparison tables, read the README first. This document focuses on the facts an LLM needs when wiring the plugin into a Payload CMS 3.x codebase or debugging its behavior.
+
+For v2.x → v3 migration, see `MIGRATION.md`.
 
 ## Installation
 
@@ -8,7 +10,7 @@ Agent-oriented reference for v2.0.0. This file is the deeper companion to `READM
 pnpm add @inoo-ch/payload-image-optimizer
 ```
 
-Peer requirements (same as v1):
+Peer requirements:
 
 - Payload CMS `^3.37.0`
 - Next.js `^14` or `^15`
@@ -37,9 +39,9 @@ export default buildConfig({
 })
 ```
 
-## Architecture (v2)
+## Architecture (v3)
 
-v2 **does not run its own sharp pipeline** for resize, format conversion, or metadata stripping. At plugin init (`src/index.ts`), the plugin resolves your options and **injects them onto each targeted collection's `upload` config**. Payload's native `generateFileData()` then owns the encoding.
+v3 **does not run its own sharp pipeline** for resize, format conversion, or metadata stripping. At plugin init (`src/index.ts`), the plugin resolves your options and **injects them onto each targeted collection's `upload` config**. Payload's native `generateFileData()` then owns the encoding.
 
 ### Keys injected onto `collection.upload`
 
@@ -47,37 +49,39 @@ All injections obey the **non-override rule**: if the user already set the key o
 
 | Key | Value produced | Condition |
 |-----|----------------|-----------|
-| `upload.formatOptions` | `{ format: formats[0].format, options: { quality: formats[0].quality } }` | `replaceOriginal: true` **and** a format is configured **and** `userUpload.formatOptions === undefined` |
+| `upload.formatOptions` | `{ format: format.format, options: { quality: format.quality } }` | A `format` is configured (non-null) **and** `userUpload.formatOptions === undefined` |
 | `upload.resizeOptions` | `{ width, height, fit: 'inside', withoutEnlargement: true }` from `maxDimensions` | `userUpload.resizeOptions === undefined` |
 | `upload.withMetadata` | `metadataPolicy` callback, or `false` when `stripMetadata: true`, else unset | `userUpload.withMetadata === undefined` |
-| `upload.imageSizes[i].formatOptions` | Same as parent `formatOptions` | A primary format is set **and** that size doesn't already have `formatOptions` |
-| `upload.adminThumbnail` | Function returning `{staticDir|slug}/{filename}` for `'auto'`, else pass-through | `userUpload.adminThumbnail === undefined` and `adminThumbnail !== false` |
+| `upload.imageSizes[i].formatOptions` | Same as parent `formatOptions` | A `format` is set **and** that size doesn't already have `formatOptions` |
+| `upload.adminThumbnail` | Function preferring smallest `doc.sizes[*].url`, falling back to `/api/{slug}/file/{filename}` for `'auto'`; else pass-through | `userUpload.adminThumbnail === undefined` and `adminThumbnail !== false` |
 | `upload.modifyResponseHeaders` | `Cache-Control: public, max-age=31536000, immutable` for `'immutable'`, else pass-through | `userUpload.modifyResponseHeaders === undefined` and `responseHeaders !== false` |
 
-The per-`imageSize` `formatOptions` injection is why v2 produces `.webp` files for every configured size (e.g., `media-300x225.webp` instead of `.jpg`). Payload's `createImageSizes` derives the extension from the produced MIME type.
+The per-`imageSize` `formatOptions` injection is why v3 produces `.webp` files for every configured size (e.g., `media-300x225.webp` instead of `.jpg`). Payload's `createImageSizes` derives the extension from the produced MIME type.
 
-### What the plugin still owns in v2
+### What the plugin still owns in v3
 
 Hooks registered on each targeted collection:
 
 - `beforeOperation` — snapshot `req.file.size` into `req.context.imageOptimizer_originalSize` before `generateFileData()` mutates it.
-- `beforeChange` — apply optional filename strategy, compute `imageOptimizer.originalSize/optimizedSize/status`, run ThumbHash inline when no additive job is needed, short-circuit on native re-uploads (focal point/crop).
-- `afterChange` — for multi-format configs only, queue the `imageOptimizer_convertFormats` job and kick the job runner through `waitUntil`.
+- `beforeChange` — apply optional filename strategy, compute `imageOptimizer.originalSize/optimizedSize`, run ThumbHash inline, short-circuit on native re-uploads (focal point/crop). **Resolves synchronously — status is always `'complete'` when the upload returns.**
 
 Other plugin-owned surfaces:
 
-- Two Payload job tasks: `imageOptimizer_convertFormats` and `imageOptimizer_regenerateDocument` (both `retries: 2`).
+- One Payload job task: `imageOptimizer_regenerateDocument` (`retries: 2`) — only runs when the regenerate button fires.
 - Three REST endpoints at `/api/image-optimizer/regenerate` (POST/GET/DELETE).
 - An `image-optimizer-state` hidden global (stores per-collection `startedAt`, `cancelledAt`, `queued`).
 - Injected admin components: `UploadOptimizer` (replacing the default upload component when `clientOptimization` is on) and `RegenerationButton` (beforeListTable, when `regenerateButton.enabled`).
 - i18n translations merged via `deepMergeSimple`.
 
-### What v2 dropped from v1
+### What v3 dropped from v2
 
-- No sharp pipeline inside the plugin for the parent file (formats/resize/EXIF all run through Payload now).
-- No `afterChange` disk write — `uploadFiles()` already wrote the optimized buffer; cloud storage adapters receive the same buffer through `req.file.data`.
-- No buffer mutation inside the plugin's hooks.
-- The `imageOptimizer.variants` array is **empty for single-format collections**. v1 pushed the primary format into `variants` even when it was already the parent file; v2 only populates `variants` with formats beyond `formats[0]`.
+- **`afterChange` hook** — only existed to queue the convertFormats job, which no longer exists.
+- **`convertFormats` task** — additive multi-format variants (e.g. AVIF sibling next to WebP). Only ever worked on local disk; cloud storage paths early-returned.
+- **`imageOptimizer.variants` field** — unused without additive variants.
+- **`formats: FormatQuality[]`** — collapsed to `format: FormatQuality | null` (singular).
+- **`replaceOriginal`** — had no meaningful behavior once additive variants were gone.
+- **Status enum values `'pending'` / `'processing'`** — beforeChange is synchronous; status is `'complete' | 'error'`.
+- **Context flags** `imageOptimizer_processedBuffer`, `imageOptimizer_statusResolved`, `imageOptimizer_hasUpload` — async-coordination plumbing, no longer needed.
 
 ## Configuration Reference
 
@@ -90,13 +94,12 @@ export type ImageOptimizerConfig = {
   collections: Partial<Record<CollectionSlug, true | CollectionOptimizerConfig>>
   disabled?: boolean
   fieldsOverride?: FieldsOverride
-  formats?: FormatQuality[]
+  format?: FormatQuality | null
   generateFilename?: GenerateFilename
   generateThumbHash?: boolean
   maxDimensions?: { width: number; height: number }
   metadataPolicy?: MetadataPolicy
   regenerateButton?: boolean | RegenerateButtonConfig
-  replaceOriginal?: boolean
   responseHeaders?: ResponseHeadersOption
   stripMetadata?: boolean
 }
@@ -105,12 +108,11 @@ export type ImageOptimizerConfig = {
 | Option | Type | Default | Purpose |
 |--------|------|---------|---------|
 | `collections` | `Record<slug, true \| CollectionOptimizerConfig>` | **required** | Which upload collections to target. `true` = use globals. |
-| `formats` | `FormatQuality[]` | `[{ format: 'webp', quality: 80 }]` | `formats[0]` becomes the parent format (when `replaceOriginal`); `formats[1..N]` run as additive variants via the `convertFormats` job. |
+| `format` | `FormatQuality \| null` | `{ format: 'webp', quality: 80 }` | Target format and quality. Injected as `upload.formatOptions` on the parent + every `imageSize`. Pass `null` to disable format conversion (original extension preserved). |
 | `maxDimensions` | `{ width, height }` | `{ 2560, 2560 }` | Injected as `resizeOptions` with `fit: 'inside'`, `withoutEnlargement: true`. |
 | `stripMetadata` | `boolean` | `true` | Sets `upload.withMetadata = false` AND ensures the plugin's injected `formatOptions`/`resizeOptions` always trigger sharp so EXIF is actually stripped (native Payload skips sharp — and preserves EXIF — when no transform is configured). Ignored when `metadataPolicy` is set. |
-| `metadataPolicy` | `(args: { metadata, req }) => boolean \| Promise<boolean>` | — | Richer alternative. Passed through as Payload's `withMetadata` callback. Return `true` to keep, `false` to strip. Takes precedence over `stripMetadata`. |
-| `replaceOriginal` | `boolean` | `true` | When true, injects `formatOptions` for the parent file. When false, parent stays in its original format and every configured format lands as an additive variant. |
-| `generateThumbHash` | `boolean` | `true` | Plugin-owned. Runs inline in `beforeChange` for single-format configs; runs inside `convertFormats` job for multi-format configs. |
+| `metadataPolicy` | `(args: { metadata }) => boolean \| Promise<boolean>` | — | Richer alternative. Passed through as Payload's `withMetadata` callback. Return `true` to keep, `false` to strip. Takes precedence over `stripMetadata`. |
+| `generateThumbHash` | `boolean` | `true` | Plugin-owned. Runs inline in `beforeChange` — lands in the initial DB write. |
 | `generateFilename` | `(args: GenerateFilenameArgs) => string` | — | Returns filename **stem** (no extension). Built-ins: `uuidFilename`, `seoFilename`, `timestampFilename`. **Incompatible with `clientUploads: true`** — blob pathname is locked at sign time (`@payloadcms/storage-vercel-blob`'s `getClientUploadRoute`); any rename in `beforeChange` would desync DB from blob. With `clientUploads: true`, use `addRandomSuffix: true` on the storage adapter instead. |
 | `clientOptimization` | `boolean` | `true` | Replace the admin upload component with `UploadOptimizer` (Canvas pre-resize). |
 | `regenerateButton` | `boolean \| { enabled?, allowForceAll? }` | `true` | Controls the collection-list regeneration button and whether "Force re-process all" is exposed. |
@@ -128,11 +130,11 @@ type AdminThumbnailOption =
   | ((args: { doc: { filename?: string | null } }) => string | null | undefined)
 ```
 
-- `'auto'` (default): injects a function that returns `` `${staticBase}/${doc.filename}` ``, where `staticBase` is the collection's `upload.staticDir` (normalized to strip slashes) or `/${collection.slug}` when no `staticDir` is set. The `staticBase` is captured at init time — the function does not depend on per-request state.
+- `'auto'` (default): returns the URL of the smallest-by-width entry in `doc.sizes` (so list views don't pull the full parent), falling back to `/api/{collection.slug}/file/{doc.filename}` when no sizes are available.
 - `string`: passed through to Payload as a size-name reference (e.g., `'thumbnail'`).
 - function: passed through as-is.
 
-The reason for `'auto'` is that `replaceOriginal: true` renames the parent from `.jpg` to `.webp`. A hand-written URL helper that appended `.jpg` would break; reading `doc.filename` always sees the converted extension.
+The reason for `'auto'` is that format conversion renames the parent from `.jpg` to `.webp`. A hand-written URL helper that appended `.jpg` would break; reading `doc.filename` always sees the converted extension.
 
 ### `responseHeaders: ResponseHeadersOption`
 
@@ -150,7 +152,7 @@ type ResponseHeadersOption =
 ### `metadataPolicy: MetadataPolicy`
 
 ```ts
-type MetadataPolicy = (args: { metadata: any; req: any }) => boolean | Promise<boolean>
+type MetadataPolicy = (args: { metadata: any }) => boolean | Promise<boolean>
 ```
 
 Example (keep EXIF on JPEGs only):
@@ -166,30 +168,28 @@ imageOptimizer({
 
 ```ts
 type CollectionOptimizerConfig = {
-  formats?: FormatQuality[]
+  format?: FormatQuality
   maxDimensions?: { width; height }
-  replaceOriginal?: boolean
 }
 ```
 
-Only these three keys can be overridden per collection. Everything else (`stripMetadata`, `generateThumbHash`, `generateFilename`, `clientOptimization`, etc.) is global.
+Only these two keys can be overridden per collection. Everything else (`stripMetadata`, `generateThumbHash`, `generateFilename`, `clientOptimization`, etc.) is global.
 
 ```ts
 imageOptimizer({
   collections: {
     media: true,
     avatars: {
-      formats: [{ format: 'webp', quality: 90 }],
+      format: { format: 'webp', quality: 90 },
       maxDimensions: { width: 256, height: 256 },
-      replaceOriginal: false,
     },
   },
 })
 ```
 
-## Hook Lifecycle (v2)
+## Hook Lifecycle (v3)
 
-The three hooks the plugin attaches, in order:
+The two hooks the plugin attaches, in order:
 
 ### `beforeOperation` (`src/hooks/beforeOperation.ts`)
 
@@ -203,6 +203,9 @@ Short-circuits when any of these hold:
 
 - `context.imageOptimizer_skip === true`
 - No `req.file` / no `req.file.data` / `mimetype` not `image/*`
+- `req.file.data.length === 0` (zero-byte guard — let Payload's upstream validation handle the error)
+- `req.file.mimetype === 'image/svg+xml'` (SVG guard — sharp would rasterize the vector; write `status: 'complete'` and return)
+- `req.file.mimetype === 'image/gif'` and `sharp(buf).metadata().pages > 1` (animated GIF guard — sharp's `.toFormat('webp')` silently drops frames; write `status: 'complete'` and return)
 - **Native re-upload detection**: `originalDoc && !context.imageOptimizer_regenerating && req.file.name === originalDoc.filename`. This is how Payload's `shouldReupload()` re-stamps a file after a focal point / crop change — re-feeding the stored (already-optimized) file. The hook preserves the existing `imageOptimizer` group, sets `context.imageOptimizer_nativeReupload = true`, and returns. The regeneration task uses the same re-upload shape but sets `imageOptimizer_regenerating` so it doesn't short-circuit.
 
 Otherwise:
@@ -210,24 +213,10 @@ Otherwise:
 1. If `resolvedConfig.generateFilename` is set, compute `stem` from `{ altText, originalFilename, mimeType, collectionSlug, existingFilename }`, read the extension from `data.filename` (set by `generateFileData` with the converted extension) or `req.file.name`, and write both `req.file.name = stem + ext` and `data.filename = stem + ext`.
 2. Read `originalSize` from `context.imageOptimizer_originalSize` (falls back to `req.file.data.length` when the snapshot is missing, in which case `originalSize === optimizedSize`).
 3. `optimizedSize = req.file.data.length` (this is the post-sharp buffer Payload will persist).
-4. `needsAsyncJob = formats.length > 1`.
-5. Stamp `data.imageOptimizer = { originalSize, optimizedSize, status: needsAsyncJob ? 'pending' : 'complete', variants: needsAsyncJob ? undefined : [], error: null }`.
-6. If `generateThumbHash && !needsAsyncJob`, run `generateThumbHash(req.file.data)` **inline** so it lands in the initial DB write (important on MongoDB transactions with cloud storage).
-7. Set `context.imageOptimizer_hasUpload = true`. Set `context.imageOptimizer_statusResolved = true` when no async job is needed.
+4. Stamp `data.imageOptimizer = { originalSize, optimizedSize, status: 'complete', error: null }`.
+5. If `generateThumbHash`, run `generateThumbHash(req.file.data)` **inline** and set `data.imageOptimizer.thumbHash`. Lands in the same DB write.
 
-### `afterChange` (`src/hooks/afterChange.ts`)
-
-Short-circuits when:
-
-- `context.imageOptimizer_skip === true`
-- `context.imageOptimizer_nativeReupload === true`
-- `context.imageOptimizer_hasUpload !== true`
-- `context.imageOptimizer_statusResolved === true` (single-format path — nothing left to do)
-- Collection's resolved `formats.length <= 1` (defensive — should already be caught by the flag above)
-
-Otherwise (multi-format path): queues `imageOptimizer_convertFormats` with `{ collectionSlug, docId }`, then calls `req.payload.jobs.run({ sequential: true })` and registers the promise with `waitUntil` so serverless environments keep the function alive.
-
-**What is no longer in `afterChange` (vs v1):** disk writes, old-file cleanup, buffer re-encoding.
+No afterChange hook. No async jobs queued on upload. The doc is returned fully stamped.
 
 ## Client-side Canvas optimization
 
@@ -241,7 +230,7 @@ When `clientOptimization: true` (default), the plugin injects `@inoo-ch/payload-
   1. Calls `setUploadStatus?.('uploading')` from `useDocumentInfo()`. **This gates Payload's `SaveButton`** so Save is blocked while the Canvas resize runs. Without this gate, submit would snapshot the field before `setFileValue(resized)` lands, either sending the oversized original or (on Vercel) reaching `/api/media` with an empty body and getting `MissingFile` 400.
   2. Sets `optimizing = true` to render a spinner + the translated label `plugin-imageOptimizer:optimizing` (falls back to `"Optimizing image…"`).
   3. Awaits `resizeImage(file)`.
-  4. If not cancelled, tracks the resized file in a `WeakSet` (so the same resized file doesn't loop through the effect again) and calls `setFileValue(resized)`.
+  4. If not cancelled, tracks the resized file in a `WeakSet` and calls `setFileValue(resized)`.
   5. In `finally`, resets `optimizing = false` and `setUploadStatus?.('idle')`.
 - Cleanup (`cancelled = true`) also re-enables Save to avoid leaving it blocked forever on unmount.
 
@@ -252,11 +241,11 @@ Defaults: `maxWidth = 2560`, `maxHeight = 2560`, `jpegQuality = 0.85`. Resizable
 **Every failure path falls back to the original `File`** — never a null/empty File:
 
 - `createImageBitmap(file)` throws → return original (corrupt image, unsupported subtype, OOM).
-- Image already within bounds (`width <= maxWidth && height <= maxHeight`) → `bitmap.close()` and return original.
+- Image already within bounds → `bitmap.close()` and return original.
 - `canvas.getContext('2d')` returns `null` → `bitmap.close()` and return original.
-- `canvas.toBlob` resolves `null` or a `blob.size === 0` → return original (iOS Safari memory pressure, security restrictions).
+- `canvas.toBlob` resolves `null` or a `blob.size === 0` → return original.
 
-On success: output is `image/png` (preserves transparency) when input was PNG, otherwise `image/jpeg`. Output filename is `${baseName}.${ext}` and `lastModified = Date.now()`.
+On success: output is `image/png` when the source has any alpha pixel (sparse RGBA scan after draw), otherwise `image/jpeg`. JPEGs skip the alpha scan (always opaque). Tainted canvases fall back to PNG.
 
 Server-side format conversion (WebP/AVIF), ThumbHash, and per-size variants still run on the server even with client optimization enabled — the client only replaces the **resize** step.
 
@@ -270,15 +259,16 @@ Client optimization only applies to single-file uploads in the admin panel. Bulk
 
 Injected as a sidebar component on each targeted collection. Displays:
 
-- Status badge (`pending` / `processing` / `complete` / `error`).
+- Status badge (`complete` / `error`).
 - Original vs optimized size + savings percentage.
 - ThumbHash blur preview thumbnail.
-- Variants list (format, dimensions, filesize, URL).
 - Per-document "Regenerate this image" button.
+
+The component polls `/api/{slug}/{id}?depth=0` every 2s only while a user-initiated regeneration is in flight. Fresh uploads don't poll — the status is terminal by the time the save response returns.
 
 ### `RegenerationButton` (collection list)
 
-Injected as `admin.components.beforeListTable` when `regenerateButton.enabled` (default true). Default action is `"Regenerate N Unoptimized"` (or `"All images optimized"` when nothing pending). Selecting rows scopes the action to those IDs. When rows are selected it sends `docIds` to the endpoint.
+Injected as `admin.components.beforeListTable` when `regenerateButton.enabled` (default true). Default action is `"Regenerate N Unoptimized"` (or `"All images optimized"` when nothing pending). Selecting rows scopes the action to those IDs.
 
 The full-collection `"Force re-process all"` checkbox is hidden unless `regenerateButton: { allowForceAll: true }` is set. The client may send `force: true` anyway, but the server ignores it when `allowForceAll` is false.
 
@@ -313,7 +303,7 @@ Request body:
 
 - 401 if unauthenticated.
 - 400 if `collection` query param missing.
-- **200 `{ configured: false, ... }` for unconfigured collections** (v1.12.1 fix — read-only status shouldn't generate error-log noise for UI polling on collections the plugin doesn't manage).
+- **200 `{ configured: false, ... }` for unconfigured collections** (read-only status shouldn't generate error-log noise for UI polling on collections the plugin doesn't manage).
 - Happy path returns:
   ```json
   {
@@ -357,23 +347,18 @@ type GenerateFilenameArgs = {
 Built-in strategies exported from the package root:
 
 - `uuidFilename` — UUID v4 stem. No human readability, no collisions.
-- `seoFilename` — slugified alt text + second-precision ISO timestamp. Falls back to the original stem when alt text is missing.
-- `timestampFilename` — original stem (slugified) + millisecond-precision ISO timestamp. Use when you want the original filename preserved but still need uniqueness. Ms precision (vs seoFilename's seconds) because there's no alt-text variation to help disambiguate.
+- `seoFilename` — slugified alt text + millisecond-precision ISO timestamp. Falls back to the original stem when alt text is missing. Non-Latin alt text (Cyrillic / CJK / Arabic / Greek) that would produce an empty slug gets an 8-char SHA-256 hash suffix for uniqueness.
+- `timestampFilename` — original stem (slugified) + millisecond-precision ISO timestamp. Use when you want the original filename preserved but still need uniqueness.
 
 Resolution (`src/defaults.ts`): `config.generateFilename` is passed through; `undefined` keeps the original stem.
 
-### Per-size filename custom naming — not supported
-
-Documented in `src/index.ts` as `TODO(generateImageName)`. Payload's `upload.imageSizes[i].generateImageName` callback does not receive document `data` (no altText, no richer MIME), so user strategies like `seoFilename` cannot produce meaningful per-size names. The plugin does not inject a `generateImageName` — Payload derives size filenames from the parent's `originalName` by default. Will revisit if Payload exposes `data` to the callback.
-
 ## ThumbHash / Blur Placeholder
 
-Plugin-owned in v2 (Payload has no native ThumbHash).
+Plugin-owned (Payload has no native ThumbHash).
 
 - `generateThumbHash(buffer)` produces a base64 ThumbHash string from an optimized buffer.
 - Stored at `doc.imageOptimizer.thumbHash`.
-- Runs **inline in `beforeChange`** for single-format configs (lands in initial DB write; survives MongoDB transactions + cloud storage).
-- Runs **inside the `convertFormats` job** for multi-format configs (deferred, decoupled from the upload response).
+- Runs **inline in `beforeChange`** — lands in initial DB write (survives MongoDB transactions + cloud storage atomicity).
 - Client utilities convert it to a `blurDataURL` via `decodeThumbHashToDataURL(thumbHash)`.
 
 Server-side helpers exported from `@inoo-ch/payload-image-optimizer`:
@@ -387,26 +372,13 @@ The plugin adds an `imageOptimizer` group field to every targeted collection (ev
 
 ```ts
 imageOptimizer: {
-  status: 'pending' | 'processing' | 'complete' | 'error',
+  status: 'complete' | 'error',
   error: string | null,
   thumbHash: string | null,
   originalSize: number,          // bytes (pre-pipeline)
-  optimizedSize: number,         // bytes (post-pipeline, parent file)
-  variants: [
-    {
-      format: 'webp' | 'avif',
-      filename: string,
-      filesize: number,
-      width: number,
-      height: number,
-      mimeType: string,
-      url: string,
-    },
-  ],
+  optimizedSize: number,         // bytes (post-pipeline)
 }
 ```
-
-**Empty `variants` array** when only one format is configured. The primary format is already the parent file (or lives beside it when `replaceOriginal: false`), so it is never pushed into `variants`. This is a breaking change from v1.
 
 Override the field set with `fieldsOverride: ({ defaultFields }) => Field[]` — exported helper `defaultImageOptimizerFields` is available as a starting point.
 
@@ -416,11 +388,9 @@ All set on `req.context`:
 
 | Flag | Written by | Consumed by | Effect |
 |------|-----------|-------------|--------|
-| `imageOptimizer_skip` | User code | All three hooks | Skip all plugin processing for this op. Use for programmatic updates that shouldn't re-trigger optimization. |
+| `imageOptimizer_skip` | User code | Both hooks | Skip all plugin processing for this op. Use for programmatic updates that shouldn't re-trigger optimization. |
 | `imageOptimizer_originalSize` | `beforeOperation` | `beforeChange` | Captures pre-pipeline byte count. |
-| `imageOptimizer_hasUpload` | `beforeChange` | `afterChange` | Marks that the hook actually processed an upload (vs. an update that changed only metadata). |
-| `imageOptimizer_statusResolved` | `beforeChange` | `afterChange` | Single-format path — skip queuing any job. |
-| `imageOptimizer_nativeReupload` | `beforeChange` | `afterChange` | Focal point / crop re-upload detected — skip queuing. |
+| `imageOptimizer_nativeReupload` | `beforeChange` | (unused externally; reserved for telemetry) | Focal point / crop re-upload detected — hook returned early. |
 | `imageOptimizer_regenerating` | `regenerateDocument` task | `beforeChange` | Opt into a full re-stamp even when `req.file.name === originalDoc.filename`. |
 
 ```ts
@@ -434,12 +404,13 @@ await payload.update({
 
 ## Background Jobs
 
-Two Payload job tasks are registered (`retries: 2` each):
+One Payload job task is registered (`retries: 2`):
 
 | Slug | Input | Output | Trigger | Purpose |
 |------|-------|--------|---------|---------|
-| `imageOptimizer_convertFormats` | `{ collectionSlug, docId }` | `{ variantsGenerated: number }` | `afterChange` (multi-format only) | Produce `formats[1..N]` as additive variants, generate deferred ThumbHash, append to `imageOptimizer.variants`, set `status: 'complete'`. |
-| `imageOptimizer_regenerateDocument` | `{ collectionSlug, docId }` | `{ status: string, reason: string }` | Regenerate endpoint | Fully re-optimize one doc by re-triggering the native pipeline via `payload.update({ file })` with `context.imageOptimizer_regenerating = true`. Generates a new UUID when a filename strategy is active. |
+| `imageOptimizer_regenerateDocument` | `{ collectionSlug, docId }` | `{ status: string, reason?: string }` | Regenerate endpoint | Fully re-optimize one doc by re-triggering the native pipeline via `payload.update({ file })` with `context.imageOptimizer_regenerating = true`. Generates a new filename when a filename strategy is active. |
+
+Upload path has **no jobs** — everything resolves synchronously in `beforeChange`.
 
 ## Client-side Display Utilities
 
@@ -481,9 +452,12 @@ Lighter alternative — returns only `placeholder`, `blurDataURL`, `style.object
 
 Returns a `next/image` `loader` or `undefined` when no variants are present. Algorithm:
 
-1. Find smallest variant with `width >= requestedWidth`.
-2. If none found, use the largest variant when it covers `>= 80%` of `requestedWidth`.
-3. Otherwise fall back to `/_next/image`.
+1. Filter variants whose aspect ratio matches the source within 3% (excludes fixed-crop variants like `og` 1200×630 or `square` 500×500 from the srcset).
+2. Find smallest matching variant with `width >= requestedWidth`.
+3. If none found, use the largest matching variant when it covers `>= 80%` of `requestedWidth`.
+4. Otherwise fall back to `/_next/image`.
+
+Cache-bust query is URL-encoded: `?v={encodedUpdatedAt}` (or `&v=...` when the variant URL already contains `?`, e.g. signed CDN URLs).
 
 ### `getDefaultSizes(fill: boolean)`
 
@@ -597,7 +571,7 @@ The browser PUTs directly to Blob using a signed URL. The pathname is locked at 
 
 ### "This blob already exists" (server-side uploads only)
 
-Only applies with `clientUploads: false`. With `replaceOriginal: true` (default), the parent filename changes (`photo.jpg` → `photo.webp`). If a blob under the new name exists, Vercel Blob throws. `@payloadcms/storage-vercel-blob` doesn't pass `allowOverwrite`.
+Only applies with `clientUploads: false`. When a `format` is configured (the default), the parent filename changes (`photo.jpg` → `photo.webp`). If a blob under the new name exists, Vercel Blob throws. `@payloadcms/storage-vercel-blob` doesn't pass `allowOverwrite`.
 
 **Fix:** use a filename strategy so names are unique per upload:
 
@@ -608,52 +582,9 @@ imageOptimizer({
 })
 ```
 
-This fixes both initial uploads and the regeneration task (which also generates a new UUID when re-uploading to cloud storage).
+This fixes both initial uploads and the regeneration task. Payload stores the full URL in the database, so UUID filenames are transparent to your application.
 
-**Alternative:** `addRandomSuffix: true` on the storage adapter — fixes initial uploads only, not regeneration. This is the **only** filename-uniqueness approach that works with `clientUploads: true`.
-
-## Migration
-
-### From v2.0.x → v2.1.0
-
-One breaking change: the already-`@deprecated` `uniqueFileNames` option is removed.
-
-**If you have `uniqueFileNames: true` in your config:**
-
-```ts
-// Before (v2.0.x)
-imageOptimizer({
-  collections: { media: true },
-  uniqueFileNames: true,
-})
-
-// After (v2.1.0)
-import { imageOptimizer, uuidFilename } from '@inoo-ch/payload-image-optimizer'
-
-imageOptimizer({
-  collections: { media: true },
-  generateFilename: uuidFilename,
-})
-```
-
-**If you were not setting `uniqueFileNames`:** no action needed. Bump the dependency.
-
-**Detection:** TypeScript emits `Object literal may only specify known properties` on `uniqueFileNames`. Runtime-wise, a stray `uniqueFileNames: true` is silently ignored — images will keep their original filenames and you may see Vercel Blob "already exists" errors on regeneration. Grep your repo for `uniqueFileNames` before bumping.
-
-No other behavior changes. Document schema, admin UI, REST endpoints, and background tasks are identical to 2.0.x.
-
-### From v1.x → v2.x
-
-The user-facing `ImageOptimizerConfig` shape is unchanged. Existing configs work. What to verify:
-
-1. **Per-size file extensions changed.** `media-300x225.jpg` is now `media-300x225.webp` (assuming a WebP primary). If your application persists size filenames outside Payload, regenerate them.
-2. **`imageOptimizer.variants` is empty for single-format collections.** v1 pushed the primary format in; v2 does not. If any consumer code reads `variants[0]` expecting the primary, read `doc.url` / `doc.filename` instead, or check `variants.length` before indexing.
-3. **Non-override rule.** If your collection already sets `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, or per-size `formatOptions`, the plugin leaves them alone. Remove them to let the plugin manage them, or keep them to override.
-4. **`adminThumbnail`** now defaults to `'auto'`. If you previously relied on Payload falling back to `file` (the parent URL) for admin thumbnails with a custom extension, this is a non-change; if you had no `adminThumbnail` and depended on a specific behavior, review the generated function.
-5. **Regeneration.** v2's regeneration task re-triggers the native Payload pipeline via `payload.update({ file })` with `context.imageOptimizer_regenerating`, rather than running its own sharp pass. Behaves the same from the admin UI's perspective.
-6. **No disk-level overwrite in `afterChange`.** Cloud storage adapters that relied on re-reading the final file from disk after the plugin's old `afterChange` will not see a second write event — the single write happens during `uploadFiles()`.
-
-Bump the dependency; in most setups no code changes are required.
+**Alternative:** `addRandomSuffix: true` on the storage adapter — fixes initial uploads only. This is the **only** filename-uniqueness approach that works with `clientUploads: true`.
 
 ## Full Example
 
@@ -674,13 +605,10 @@ export default buildConfig({
         media: true,
         avatars: {
           maxDimensions: { width: 256, height: 256 },
-          formats: [{ format: 'webp', quality: 90 }],
+          format: { format: 'webp', quality: 90 },
         },
       },
-      formats: [
-        { format: 'webp', quality: 80 },
-        { format: 'avif', quality: 65 },
-      ],
+      format: { format: 'webp', quality: 80 },
       generateFilename: seoFilename,
       metadataPolicy: ({ metadata }) => metadata.format === 'jpeg',
       adminThumbnail: 'auto',

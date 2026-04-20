@@ -1,5 +1,42 @@
 # Changelog
 
+## 3.0.0 — Honest positioning: remove features Payload already does
+
+Breaking release. The plugin now only ships what Payload can't do natively. Everything Payload handles well (resize, format, EXIF strip, per-size variants, focal-point crops) stays configured through the plugin, but via one-to-one pass-throughs to `upload.formatOptions` / `upload.resizeOptions` / `upload.withMetadata`. The additional plumbing that existed to layer *on top of* that pipeline is gone.
+
+See [MIGRATION.md](./MIGRATION.md) for the full v2.x → v3 migration guide.
+
+### Removed
+
+- **Additive multi-format variants.** The `convertFormats` task, the `afterChange` hook that queued it, the `imageOptimizer.variants` field, and the `formats: FormatQuality[]` (array) config are all gone. The feature only ever produced variants on local-disk storage — cloud storage paths (S3, Vercel Blob, R2) early-returned with `variants: []`. It was 150 lines of async job plumbing for a feature most production deployments couldn't use. For different formats per size, use Payload's native per-`imageSize.formatOptions`.
+- **`replaceOriginal` option.** Without additive variants, `replaceOriginal: false` had no meaningful behavior. When `format` is set, the original is always replaced via Payload's native `upload.formatOptions`. To keep the original unchanged, pass `format: null`.
+- **Status values `'pending'` and `'processing'`.** `beforeChange` now resolves status synchronously. The enum is `'complete' | 'error'`.
+- **Context flags** `imageOptimizer_processedBuffer`, `imageOptimizer_statusResolved`, `imageOptimizer_hasUpload` — all were async-coordination plumbing, none needed.
+
+### Changed (breaking)
+
+- **`formats: FormatQuality[]` → `format: FormatQuality | null`.** Singular. Pass `null` to disable format conversion.
+- **`CollectionOptimizerConfig`** mirrors the same change (`formats` → `format`, no more `replaceOriginal`).
+- **`imageOptimizer.status` enum** narrowed to `'complete' | 'error'`.
+- **`imageOptimizer.variants` field** removed from the group.
+
+### Improvements this simplification enables
+
+- **Upload is faster.** No async job, no `waitUntil` follow-up, no second document write. Every upload is one DB commit with the full `imageOptimizer` record.
+- **Cloud storage atomicity improved.** The old flow could commit a new filename to the DB before the follow-up blob upload completed — if the follow-up failed, the DB referenced a missing blob. That failure window is gone.
+- **Regeneration simplified.** The `regenerateDocument` task no longer has to coordinate with a downstream `convertFormats` job.
+- **Smaller plugin.** ~250 fewer lines of non-delegating plumbing.
+
+### Unchanged
+
+- Everything you actually use day-to-day: `clientOptimization`, `generateFilename` + strategies, `generateThumbHash`, `adminThumbnail`, `responseHeaders`, `metadataPolicy` / `stripMetadata`, `regenerateButton`, `<ImageBox>` / `<FadeImage>` / `getOptimizedImageProps()` / `createVariantLoader()`, the REST endpoints.
+
+### Tests
+
+96/96 passing: 8 test files (7 unit + 1 integration) + 1 e2e admin smoke test.
+
+---
+
 ## 2.2.0 — Lifecycle audit fixes
 
 A maintenance release from an end-to-end audit of the upload → save → read lifecycle. Seven fixes land together — each disjoint, unit-covered, and verified against the dev admin. One minor type tightening is technically breaking but runtime-identical.

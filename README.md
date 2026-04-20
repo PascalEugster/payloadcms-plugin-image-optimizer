@@ -4,27 +4,31 @@
 [![npm downloads](https://img.shields.io/npm/dm/@inoo-ch/payload-image-optimizer)](https://www.npmjs.com/package/@inoo-ch/payload-image-optimizer)
 [![GitHub](https://img.shields.io/github/license/PascalEugster/payloadcms-plugin-image-optimizer)](https://github.com/PascalEugster/payloadcms-plugin-image-optimizer)
 
-A [Payload CMS](https://payloadcms.com) plugin that layers a turnkey image-optimization workflow on top of Payload's native sharp pipeline — zero-config multi-format output, ThumbHash blur placeholders, bulk regeneration UI, client-side pre-resize, and Next.js display components.
+A [Payload CMS](https://payloadcms.com) plugin that adds the pieces Payload doesn't ship: **client-side pre-resize, ThumbHash blur placeholders, filename strategies, bulk regeneration UI, and Next.js display components** — layered on top of Payload's own sharp pipeline.
 
 Built and maintained by [inoo.ch](https://inoo.ch) — a Swiss digital agency crafting modern web experiences.
 
 ## What This Plugin Adds
 
-Payload already ships with sharp and exposes `formatOptions`, `resizeOptions`, `imageSizes`, and `withMetadata` — so format conversion, resizing, and EXIF stripping are achievable natively with per-collection wiring. This plugin's value is the layer *around* that pipeline: sensible coordinated defaults, admin UX, frontend integration, and workflows Payload does not provide.
+Payload 3.x already ships with sharp and exposes `formatOptions`, `resizeOptions`, `imageSizes`, and `withMetadata` — so format conversion, resize, per-size variants, focal-point-aware cropping, and EXIF stripping are all achievable natively. **This plugin does not replace any of that.** It injects sensible defaults onto your collection's upload config and then adds the things Payload genuinely doesn't do.
 
-### Things Payload can do natively (this plugin makes them turnkey)
+### Things Payload can already do (the plugin just sets sensible defaults)
 
-- **Coordinated multi-format output** — WebP + AVIF + original as additive variants via a single config block, instead of hand-rolling `formatOptions` across `imageSizes`.
-- **Global + per-collection defaults** — Configure once, override per collection, without repeating `formatOptions`/`resizeOptions`/`withMetadata` on every upload config.
-- **Opinionated defaults** — WebP at quality 80, max 2560×2560, EXIF stripped, sensible quality ladder — wired up on install.
+- Convert originals + per-size variants to WebP (or AVIF) — via `upload.formatOptions` and per-`imageSize.formatOptions`
+- Resize to max dimensions — via `upload.resizeOptions`
+- Strip EXIF — via `upload.withMetadata: false`
+- Focal-point-aware cropping for `imageSizes`
+- Admin crop / focal-point UI
+
+Prefer to wire those yourself? You don't need this plugin for any of them.
 
 ### Things Payload does not do out of the box
 
+- **Client-side pre-resize** — Canvas-based resize in the browser *before* the file hits the network. Cuts 12MB DSLR photos to ~100–500KB pre-upload. Particularly important with `clientUploads: true` (Vercel Blob), where the server-side sharp pipeline is bypassed entirely.
 - **ThumbHash blur placeholders** — Tiny base64 hashes generated per image for instant blur-up previews.
-- **Bulk regeneration UI** — One-click reprocess-all or reprocess-unoptimized from the admin, with progress tracking and a REST API.
-- **Optimization status panel** — Admin sidebar showing status, original vs. optimized size, savings %, variant list, and blur preview.
-- **Client-side pre-resize** — Canvas-based resize in the browser before upload, cutting 12MB DSLR photos to ~100–500KB pre-upload. Lets most uploads stay under Vercel's 4.5MB serverless body limit without needing `clientUploads: true` (which breaks server-side format conversion and `seoFilename` — see below).
-- **Filename strategies** — UUID filenames to avoid Vercel Blob "already exists" collisions during regeneration.
+- **Filename strategies** — Top-level `generateFilename` callback (Payload only exposes per-`imageSize.generateImageName`, not a parent-level one). Built-ins: `uuidFilename` (avoids Vercel Blob "already exists"), `seoFilename` (alt-text → slug), `timestampFilename`.
+- **Bulk regeneration UI** — One-click reprocess-all or reprocess-unoptimized from the admin, with progress tracking, stop button, and a REST API.
+- **Optimization status panel** — Admin sidebar showing original vs. optimized size, savings %, and blur preview.
 - **Next.js display components** — `<ImageBox>` and `<FadeImage>` wrappers with ThumbHash blur, fade-in, focal point, and a responsive variant loader that serves pre-generated `imageSizes` variants directly (bypassing `/_next/image` re-optimization).
 - **Template integration helper** — `getOptimizedImageProps()` adds ThumbHash + focal point + variant loader to the Payload website template's `<NextImage>` in 3 lines.
 
@@ -67,7 +71,7 @@ export default buildConfig({
 })
 ```
 
-That's it. Every image uploaded to the `media` collection will be automatically optimized with sensible defaults.
+That's it. Every image uploaded to the `media` collection is resized to 2560×2560, converted to WebP, stripped of EXIF, and gets a ThumbHash placeholder.
 
 ## Configuration
 
@@ -77,20 +81,14 @@ That's it. Every image uploaded to the `media` collection will be automatically 
 imageOptimizer({
   collections: {
     media: {
-      formats: [
-        { format: 'webp', quality: 90 },
-        { format: 'avif', quality: 75 },
-      ],
+      format: { format: 'webp', quality: 90 },
       maxDimensions: { width: 4096, height: 4096 },
     },
     avatars: true, // uses global defaults
   },
 
-  // Global defaults (overridden by per-collection config)
-  formats: [
-    { format: 'webp', quality: 80 },
-    // { format: 'avif', quality: 65 }, // opt-in — AVIF is ~5-10x slower to encode than WebP
-  ],
+  // Global defaults (per-collection config overrides these)
+  format: { format: 'webp', quality: 80 },  // null disables format conversion entirely
   maxDimensions: { width: 2560, height: 2560 },
   generateThumbHash: true,
   stripMetadata: true,
@@ -109,35 +107,32 @@ imageOptimizer({
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `collections` | `Record<string, true \| CollectionConfig>` | *required* | Collections to optimize. Use `true` for defaults or an object for overrides. |
-| `formats` | `FormatQuality[]` | `[{ format: 'webp', quality: 80 }]` | Output formats and quality (1-100). |
+| `format` | `FormatQuality \| null` | `{ format: 'webp', quality: 80 }` | Target format and quality (1-100). Pass `null` to disable format conversion (keep original extension). |
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions. Images are resized to fit within these bounds. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholders for instant image previews. |
 | `stripMetadata` | `boolean` | `true` | Sets `upload.withMetadata: false` AND guarantees sharp runs on every upload (Payload skips sharp entirely when no transform is configured, which preserves EXIF). Use `metadataPolicy` for richer control. |
 | `generateFilename` | `(args) => string` | — | Custom filename **stem** generator. Built-ins: `uuidFilename` (UUID — prevents Vercel Blob "already exists" errors), `seoFilename` (human-readable from alt text), `timestampFilename` (original filename stem + ISO timestamp with ms). **Note:** all filename strategies only work with server-side uploads (Payload default, `clientUploads: false`). With `clientUploads: true` the blob pathname is locked client-side before server hooks run, so `generateFilename` is effectively ignored — use `addRandomSuffix: true` on the storage adapter instead. See [Filename strategies and client uploads](#filename-strategies-and-client-uploads). |
 | `clientOptimization` | `boolean` | `true` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
 | `regenerateButton` | `boolean \| { enabled?: boolean, allowForceAll?: boolean }` | `true` | Controls the regeneration UI. `false` hides it entirely. Pass an object to opt in to the `Force re-process all` checkbox (`allowForceAll: true`) — off by default so the primary action is always "Regenerate N Unoptimized". |
-| `adminThumbnail` | `'auto' \| string \| function` | `'auto'` | Injects an `upload.adminThumbnail` on each targeted collection. `'auto'` emits a function that returns a URL from `doc.filename` so admin thumbnails survive the v2 parent-extension change (`.jpg` → `.webp`). String mode is treated as a size-name reference; function mode is passed through. Respects user-set values. |
+| `adminThumbnail` | `'auto' \| string \| function` | `'auto'` | Injects an `upload.adminThumbnail` on each targeted collection. `'auto'` picks the smallest pre-generated `doc.sizes` entry (avoids downloading the full parent into a 50-px list row) and falls back to `/api/{slug}/file/{filename}` — surviving the `.jpg` → `.webp` parent-extension change. String mode is treated as a size-name reference; function mode is passed through. Respects user-set values. |
 | `responseHeaders` | `false \| 'immutable' \| function` | `false` | Opt-in `upload.modifyResponseHeaders` injection. `'immutable'` sets `Cache-Control: public, max-age=31536000, immutable` — only safe with content-stable filenames (`generateFilename`); otherwise the plugin warns at init. Function mode is passed through. Respects user-set values. |
-| `metadataPolicy` | `({ metadata, req }) => boolean \| Promise<boolean>` | — | Richer alternative to `stripMetadata`. When set, passed through as `withMetadata` (return `true` to keep, `false` to strip). Takes precedence over `stripMetadata`. Respects user-set values. |
+| `metadataPolicy` | `({ metadata }) => boolean \| Promise<boolean>` | — | Richer alternative to `stripMetadata`. When set, passed through as `withMetadata` (return `true` to keep, `false` to strip). Takes precedence over `stripMetadata`. Respects user-set values. |
 | `disabled` | `boolean` | `false` | Disable optimization while keeping schema fields intact. |
 
 ### Per-Collection Overrides
 
-Each collection can override `formats` and `maxDimensions`:
+Each collection can override `format` and `maxDimensions`:
 
 ```ts
 collections: {
   // Hero images: higher quality, larger dimensions
   heroes: {
-    formats: [{ format: 'webp', quality: 95 }],
+    format: { format: 'webp', quality: 95 },
     maxDimensions: { width: 3840, height: 2160 },
   },
-  // Thumbnails: smaller, more aggressive compression
+  // Thumbnails: more aggressive compression
   thumbnails: {
-    formats: [
-      { format: 'webp', quality: 60 },
-      { format: 'avif', quality: 45 },
-    ],
+    format: { format: 'webp', quality: 60 },
     maxDimensions: { width: 800, height: 800 },
   },
 }
@@ -160,21 +155,21 @@ imageOptimizer({
 - Reduces serverless function processing time (smaller input = faster sharp conversion)
 - EXIF metadata is stripped automatically (Canvas output has no metadata)
 
-**What stays server-side:** Format conversion (WebP/AVIF), ThumbHash generation, and variant creation still happen on the server with sharp for quality consistency. The client only handles resize — the highest-impact optimization with zero quality trade-off.
+**What stays server-side:** Format conversion (WebP/AVIF), ThumbHash generation, and per-size variant creation still happen on the server with sharp for quality consistency. The client only handles resize — the highest-impact optimization with zero quality trade-off.
 
-**Save-button behavior:** While the client-side resize is running, the Save button is disabled and an "Optimizing image…" spinner appears below the uploader. The plugin sets `useDocumentInfo().setUploadStatus('uploading')` for the duration of the resize so Payload's `SaveButton` short-circuits — submit never runs with a stale field snapshot. Status is reset to `'idle'` on completion, error, and unmount. The hint is localized via the `plugin-imageOptimizer:optimizing` i18n key (en / de / fr included).
+**Save-button behavior:** While the client-side resize is running, the Save button is disabled and an "Optimizing image…" spinner appears below the uploader. Status is reset on completion, error, and unmount. The hint is localized via the `plugin-imageOptimizer:optimizing` i18n key (en / de / fr included).
 
 **Limitations:** Only applies to single-file uploads in the admin panel. Bulk uploads and API/programmatic uploads are processed server-side as usual.
 
-## How It Works (v2)
+## How It Works
 
 1. **Plugin init** — The plugin resolves your options and injects them as native upload-config (`upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and per-`imageSize` `formatOptions`) on each targeted collection.
-2. **Upload** — Payload's own `generateFileData()` runs your image through sharp once: resize to `maxDimensions`, convert to the primary format (e.g. WebP), strip metadata, generate every `imageSize` variant — all in the format you configured.
-3. **Hooks** — A small `beforeChange` hook stamps the `imageOptimizer` group (originalSize / optimizedSize / status / ThumbHash) and applies your optional filename strategy.
-4. **Additive variants** — When you configure more than one format (e.g. WebP primary + AVIF), a background job produces the additive formats and updates the doc.
-5. **Done** — The document carries variant URLs, file sizes, ThumbHash, and status.
+2. **Upload** — Payload's own `generateFileData()` runs your image through sharp once: resize to `maxDimensions`, convert to your target format (e.g. WebP), strip metadata, generate every `imageSize` variant.
+3. **beforeOperation hook** — Captures the pre-pipeline file size so the savings metric is accurate.
+4. **beforeChange hook** — Stamps the `imageOptimizer` group (originalSize / optimizedSize / status / ThumbHash) and applies your optional filename strategy. Always resolves synchronously — status is `'complete'` immediately.
+5. **Done** — The document is saved exactly once. No async jobs, no post-save follow-ups.
 
-This delegates the heavy lifting to Payload's native pipeline — single-format mode adds essentially zero overhead vs stock Payload.
+This delegates the heavy lifting to Payload's native pipeline. The plugin adds one sharp decode for ThumbHash generation (100×100 raw) and nothing else.
 
 ### Vercel / Serverless Deployment
 
@@ -185,7 +180,7 @@ Image processing (especially AVIF encoding and metadata stripping) can exceed th
 export { maxDuration } from '@inoo-ch/payload-image-optimizer'
 ```
 
-This sets a 60-second timeout, which is sufficient for most configurations. Without this, heavy processing configs may cause upload timeouts on Vercel.
+This sets a 60-second timeout, which is sufficient for most configurations.
 
 #### Large file uploads with Vercel Blob
 
@@ -232,7 +227,7 @@ vercelBlobStorage({
 
 #### "This blob already exists" error (server-side uploads only)
 
-This only applies when `clientUploads` is **off** (the default). With `replaceOriginal: true` (also default), the plugin changes filenames during upload (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass [`allowOverwrite`](https://vercel.com/docs/vercel-blob#overwriting-blobs) to the Vercel Blob SDK.
+This only applies when `clientUploads` is **off** (the default). When a `format` is configured (the default), the plugin changes filenames during upload (e.g., `photo.jpg` → `photo.webp`). If a blob with that name already exists, Vercel Blob throws an error because `@payloadcms/storage-vercel-blob` does not pass [`allowOverwrite`](https://vercel.com/docs/vercel-blob#overwriting-blobs) to the Vercel Blob SDK.
 
 **Fix:** Set `generateFilename: uuidFilename` — replaces original filenames with UUIDs before the storage adapter sees them:
 
@@ -245,26 +240,28 @@ imageOptimizer({
 })
 ```
 
-This prevents collisions on both initial uploads and bulk regeneration (the regeneration task also generates a new UUID for cloud storage re-uploads). Payload stores the full URL in the database, so UUID filenames are transparent to your application.
+This prevents collisions on both initial uploads and bulk regeneration. Payload stores the full URL in the database, so UUID filenames are transparent to your application.
 
 **Prefer human-readable names?** `generateFilename: seoFilename` slugifies the alt text (e.g., `Edelstahl Geländer` → `edelstahl-gelaender-1745123456.webp`). Only works with server-side uploads.
 
 ## How It Differs from Payload's Default Image Handling
 
-Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and exposes `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, and per-`imageSize` `formatOptions` — so format conversion, resizing, and EXIF stripping are all achievable natively. v2 of this plugin **resolves your options and injects them onto Payload's upload config at init time**, then leans on `generateFileData()` to do the actual encoding. The plugin's value is the layer *around* that pipeline: coordinated defaults, per-collection overrides, ThumbHash placeholders, optimization status, filename strategies, additive multi-format variants, the regenerate UI, and the client-side pre-resize.
+Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) and exposes every sharp knob you need — `upload.formatOptions`, `upload.resizeOptions`, `upload.withMetadata`, per-`imageSize` `formatOptions`, focal-point-aware cropping — so the bulk of "image optimization" is native. This plugin **resolves your options and injects them onto Payload's upload config at init time**, then lets `generateFileData()` do the encoding. The plugin's value is the layer *around* that pipeline: client-side pre-resize, ThumbHash, filename strategies, the regeneration UI, and the Next.js display components.
 
 ### Comparison
 
 | Capability | Payload Default | With This Plugin |
 |---|---|---|
-| Resize to max dimensions | `upload.resizeOptions` (per collection) | Same, plus global default + per-collection override from one config block |
-| WebP/AVIF conversion | `upload.formatOptions` / per-size `formatOptions` — one format per size | Single config covers parent file + all sizes; **additive** multi-format (WebP + AVIF on the same size) |
-| EXIF metadata stripping | Sharp strips by default (`withMetadata: false`) **only when sharp runs** | Guaranteed — plugin always triggers sharp even for unchanged files |
+| Resize to max dimensions | `upload.resizeOptions` (per collection) | Same, via one config block with global default + per-collection override |
+| WebP/AVIF conversion | `upload.formatOptions` / per-size `formatOptions` — repeat per collection | Single config covers parent file + all sizes |
+| EXIF metadata stripping | Sharp strips by default (`withMetadata: false`) **only when sharp runs** | Guaranteed — plugin's injected `resizeOptions`/`formatOptions` always triggers sharp |
+| Focal-point-aware crops | Native (`upload.focalPoint`) | Unchanged — native Payload handles this |
+| Filename strategies | Per-size `generateImageName` only | Top-level `generateFilename` (seoFilename / uuidFilename / timestampFilename / custom) |
 | Blur hash placeholders | Not supported | ThumbHash generated per image |
+| Client-side pre-resize | Not supported | Canvas-based resize in browser before upload |
 | Optimization status & savings | Not supported | Admin sidebar panel per image |
-| Bulk re-process existing images | Not supported | One-click regeneration with progress tracking |
+| Bulk re-process existing images | Not supported | One-click regeneration with progress + stop button |
 | Next.js `<Image>` with blur + focal point | Manual wiring | Drop-in `<ImageBox>` / `getOptimizedImageProps()` |
-| Per-collection format/quality overrides | Repeat config per collection | Single plugin block with per-collection overrides |
 
 ### Native edge cases this plugin handles for you
 
@@ -274,22 +271,18 @@ Payload CMS ships with [sharp](https://sharp.pixelplumbing.com/) built-in and ex
 
 ### CPU & Resource Impact
 
-- **Single-pass pipeline** — Metadata stripping, resizing, and format conversion run in a single sharp pipeline (one decode/encode cycle), minimizing processing overhead.
-- **Deferred ThumbHash** — ThumbHash generation runs in the background (via the format conversion job or `waitUntil`) rather than blocking the upload response.
-- **Single-format mode** (e.g. WebP only with `replaceOriginal: true`) adds virtually zero overhead compared to Payload's default sharp processing — the plugin replaces the sharp pass rather than adding a second one.
-- **Additional format variants** (e.g. both WebP and AVIF) run as background jobs after upload — this is the one area where you'll see extra CPU usage vs vanilla Payload. Note that AVIF encoding is ~5-10x slower than WebP.
+- **Single-pass pipeline** — Metadata stripping, resize, and format conversion run in Payload's single sharp pipeline — one decode/encode cycle.
+- **ThumbHash** — One additional sharp pass (100×100 raw buffer) per upload. Negligible.
+- **No background jobs on upload** — As of v3, every upload resolves synchronously. The only async workload is bulk regeneration (which only runs when you click it).
 - **Bulk regeneration** processes images sequentially, not all at once, so it won't spike your server.
-
-If you're on a resource-constrained server, use single-format mode and you'll be at roughly the same CPU cost as stock Payload.
 
 ## Admin UI
 
 The plugin adds an **Optimization Status** panel to the document sidebar showing:
 
-- Status badge (pending / processing / complete / error)
+- Status badge (complete / error)
 - Original vs. optimized file size with savings percentage
 - ThumbHash blur preview thumbnail
-- List of generated format variants with dimensions and file sizes
 - **Regenerate this image** button to re-run optimization on the current document only
 
 A **Regenerate** button also appears in collection list views. By default it targets only unoptimized images (label reads `Regenerate N Unoptimized`, or `All images optimized` when nothing is pending). Selecting rows scopes it to just those. The full-collection "Force re-process all" opt-in is hidden unless you enable it via `regenerateButton: { allowForceAll: true }`.
@@ -361,22 +354,11 @@ The plugin adds an `imageOptimizer` field group to each configured collection:
 ```ts
 {
   imageOptimizer: {
-    status: 'pending' | 'processing' | 'complete' | 'error',
+    status: 'complete' | 'error',
     originalSize: number,    // bytes
     optimizedSize: number,   // bytes
     thumbHash: string,       // base64-encoded ThumbHash
     error: string,           // error message (if failed)
-    variants: [
-      {
-        format: string,      // 'webp' | 'avif'
-        filename: string,    // e.g. 'photo-optimized.webp'
-        filesize: number,
-        width: number,
-        height: number,
-        mimeType: string,
-        url: string,
-      },
-    ],
   },
 }
 ```
@@ -393,7 +375,7 @@ Content-Type: application/json
 ```
 
 - `force: false` — only regenerates images that are not yet complete
-- `force: true` — re-processes all images from scratch
+- `force: true` — re-processes all images from scratch (only honored when `regenerateButton.allowForceAll: true`)
 
 **Response:** `{ "queued": 42, "collectionSlug": "media" }`
 
@@ -403,9 +385,27 @@ Content-Type: application/json
 GET /api/image-optimizer/regenerate?collection=media
 ```
 
-**Response:** `{ "collectionSlug": "media", "total": 42, "complete": 30, "errored": 1, "pending": 11 }`
+**Response:** `{ "collectionSlug": "media", "total": 42, "complete": 30, "errored": 1, "pending": 11, "cancelled": false }`
 
-Both endpoints require an authenticated user.
+### Cancel In-Flight Regeneration
+
+```
+DELETE /api/image-optimizer/regenerate
+Content-Type: application/json
+
+{ "collectionSlug": "media" }
+```
+
+All endpoints require an authenticated user.
+
+## Upgrading from v2.x
+
+v3 is a breaking release. See [`MIGRATION.md`](./MIGRATION.md) for a full migration guide. In short:
+
+- `formats: FormatQuality[]` → `format: FormatQuality | null` (singular). Only one format per collection.
+- `replaceOriginal` removed. When `format` is set, the original is always replaced (via Payload's native `upload.formatOptions`).
+- `imageOptimizer.variants` field removed. Additive multi-format variants (e.g. WebP+AVIF siblings) are no longer a feature — they only worked on local disk, never on cloud storage.
+- `imageOptimizer.status` enum is now `'complete' | 'error'` (no more `'pending'` / `'processing'`).
 
 ## AI Agent Integration
 
@@ -417,11 +417,10 @@ Copy-paste this instruction to your AI coding agent to have it autonomously inte
 
 > Install `@inoo-ch/payload-image-optimizer` and integrate it into this Payload CMS project. Read `node_modules/@inoo-ch/payload-image-optimizer/AGENT_DOCS.md` for the full API reference. Based on the project's existing upload collections and frontend, decide on your own:
 >
-> 1. Which upload collections should be optimized and with what settings
-> 2. Whether to use `replaceOriginal` or keep originals alongside variants
-> 3. For **new components**: use `<ImageBox>` — it handles ThumbHash blur, fade-in, focal point, responsive variant loading, and smart `sizes` defaults automatically
-> 4. For **existing components** (especially the Payload website template's `ImageMedia`): use `getOptimizedImageProps(resource)` — a single spread that adds ThumbHash, focal point, and variant loader to any `<NextImage>`
-> 5. If collections have `imageSizes` configured, the variant loader will automatically serve pre-generated size variants directly instead of going through `/_next/image` re-optimization
+> 1. Which upload collections should be optimized and with what settings (`format`, `maxDimensions`)
+> 2. For **new components**: use `<ImageBox>` — it handles ThumbHash blur, fade-in, focal point, responsive variant loading, and smart `sizes` defaults automatically
+> 3. For **existing components** (especially the Payload website template's `ImageMedia`): use `getOptimizedImageProps(resource)` — a single spread that adds ThumbHash, focal point, and variant loader to any `<NextImage>`
+> 4. If collections have `imageSizes` configured, the variant loader will automatically serve pre-generated size variants directly instead of going through `/_next/image` re-optimization
 >
 > Use the zero-config default (`collections: { <slug>: true }`) unless the project has specific requirements that call for custom settings.
 
