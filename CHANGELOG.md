@@ -1,5 +1,31 @@
 # Changelog
 
+## 3.5.0 — Opt-in pre-decoded blur data URLs
+
+`getImageOptimizerProps()` runs `thumbHashToDataURL` on every render to turn a stored ThumbHash into a base64 PNG data URL. That helper is JS-native: an inverse-DCT decode into a small RGBA buffer, a manual Deflate stream, a CRC and base64 pack of the resulting PNG. Plugin consumers have reported empirically that the decode costs roughly 1–5 ms per image on mid-tier Android — small per image, but a listing with 20+ media items pays that cost 20+ times per render and it shows up as TBT. No benchmark has been run inside this plugin yet; measure before flipping the flag on.
+
+The decode is deterministic — given the same `thumbHash`, the data URL is always identical — so nothing about it actually needs to run at render time. Moving it to upload time converts the cost into a one-off server-side compute per image ever uploaded and a stored string read on every subsequent render.
+
+### Added
+
+- **`storeBlurDataURL` config option** (`boolean`, default `false`). Opt-in. When `true`, the `imageOptimizer` group on every targeted collection gains a hidden, `readOnly` `blurDataURL` text field, and `beforeChange` pre-decodes the ThumbHash into its base64 PNG data URL via the plugin's internal `decodeThumbHashToDataURL()` helper and persists the result. Default `false` preserves current behavior exactly — no schema change, no new payload bytes, no code-path difference for existing installs.
+- **Render-path fast path in `getImageOptimizerProps()`.** When a stored `imageOptimizer.blurDataURL` is present on the doc, it is used directly and the per-render `thumbHashToDataURL` call is skipped. When the field is absent — existing docs uploaded before the flag was flipped on, or any collection where the flag is off — the existing runtime decode runs as before. Full back-compat: no reads break, no consumer code change required.
+
+### Trade-offs
+
+- **Wire payload grows.** A ThumbHash-derived data URL is typically 1–3 KB. With the flag on, every doc serialized out of a collection listing endpoint carries that extra string. On small catalogues this is negligible; on very large listings (hundreds of media docs returned per request) it is worth measuring before enabling. This is the reason the flag is off by default.
+- **One-off backfill for existing docs.** Flipping the flag on an existing site activates the new code path for new uploads only — existing docs continue to render correctly via the runtime-decode fallback. To get the optimization on the entire catalogue, run the plugin's existing **Regenerate All Documents** button (or `POST /api/image-optimizer/regenerate`). The regeneration task already re-runs `beforeChange`, so it fills in the field on every processed doc with no new endpoint needed.
+
+### Internal
+
+- `resolveConfig()` in `src/defaults.ts` now emits `storeBlurDataURL: boolean` on `ResolvedImageOptimizerConfig`.
+- The existing `decodeThumbHashToDataURL(thumbHash: string): string` helper in `src/utilities/thumbhash.ts` (exported from the plugin root) now has a second caller — `beforeChange` — so both the render-path fallback and the upload-time pre-decode share one code path.
+- `imageOptimizer.blurDataURL` text field is conditionally appended to the group only when the flag resolves to `true`. Field is `admin.hidden` + `admin.readOnly` to keep the edit view clean.
+- `beforeChange` in `src/hooks/beforeChange.ts` populates the field from `imageOptimizer.thumbHash` once per write when the flag is on.
+- `getImageOptimizerProps()` prefers `imageOptimizer.blurDataURL` when present; falls back to the runtime `thumbHashToDataURL` decode otherwise.
+
+---
+
 ## 3.4.0 — Bypass MongoDB transactions on regen, bump maxDuration to 300s
 
 Field reports surfaced that the regeneration task was hanging on large originals with "Transaction with { txnNumber: N } has been aborted." The root cause: MongoDB's default `transactionLifetimeLimitSeconds` is **60 seconds**, and the `payload.update({ file })` call in the task does the whole sharp + 3-upload pipeline inside one transaction. On a 10MB+ DSLR source with cloud storage, the pipeline routinely exceeds 60s. MongoDB then aborts the transaction, the primary throw cascades, and our catch-block writeback — still running against the same poisoned transaction — also fails. Result: a hung regen with no recorded error status, visible only as "task ran, never completed" in the job logs.

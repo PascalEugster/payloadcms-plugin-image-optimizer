@@ -31,6 +31,7 @@ export default defineConfig(() => {
         'dev/filenameStrategies.unit.spec.ts',
         'dev/logger.unit.spec.ts',
         'dev/regenerateUseTransactions.unit.spec.ts',
+        'dev/storeBlurDataURL.unit.spec.ts',
       ],
     },
   }

@@ -198,3 +198,41 @@ Everything you actually use day-to-day is unchanged:
 - **"I had custom code reading `doc.imageOptimizer.variants`"** — switch to `doc.sizes` (Payload's native) for per-size URLs.
 
 Still stuck? Open an issue at https://github.com/PascalEugster/payloadcms-plugin-image-optimizer/issues.
+
+---
+
+# Migration Guide — v3.4.0 → v3.5.0
+
+**No changes required unless you want to opt in.** 3.5.0 is purely additive — the new `storeBlurDataURL` flag defaults to `false`, so upgrading alone changes nothing about your schema, wire payload, or render path.
+
+## When to opt in
+
+3.5.0 adds an opt-in fast path for the blur placeholder data URL that `getImageOptimizerProps()` otherwise decodes from `imageOptimizer.thumbHash` on every render. The decode is a JS-native inverse-DCT + manual Deflate/CRC/base64 PNG build — observed empirically by plugin consumers to cost roughly 1–5 ms per image on mid-tier Android. On listing pages with 20+ media items it can add up to measurable TBT. Measure your own render path before flipping it on.
+
+## Trade-off
+
+When `storeBlurDataURL: true`, the base64 data URL (typically 1–3 KB per doc) is persisted on every media doc and therefore ships in every listing-endpoint response. On small catalogues this is fine; on very large listings (hundreds of docs per request) it's worth weighing against the client-side decode cost you'd save.
+
+## Three-step opt-in
+
+1. **Upgrade the dependency** to `3.5.0`.
+2. **Set the flag** in your plugin config:
+   ```ts
+   imageOptimizer({
+     collections: { media: true },
+     storeBlurDataURL: true,
+   })
+   ```
+3. **Regenerate types** so the new `imageOptimizer.blurDataURL` field appears on your generated media doc type:
+   ```bash
+   pnpm payload generate:types
+   ```
+4. **Backfill existing documents.** New uploads automatically get the field populated in `beforeChange`. Existing docs uploaded before the flag was set continue to render correctly — `getImageOptimizerProps()` falls back to the runtime decode when the field is absent — but to get the optimization on them too, click the plugin's **Regenerate All Documents** button in the admin collection list, or hit:
+   ```
+   POST /api/image-optimizer/regenerate
+   ```
+   The regeneration task already re-runs `beforeChange`, so it fills in `imageOptimizer.blurDataURL` on every processed doc. No new endpoint was added.
+
+## Rolling back
+
+Setting `storeBlurDataURL: false` (or removing the flag) immediately reverts the render path to the existing runtime decode. The stored field on already-processed docs becomes dead data but doesn't break anything — it is simply ignored when the flag is off. If you want to reclaim the storage, unset the field with a `$unset` on MongoDB (or equivalent) after rollback.

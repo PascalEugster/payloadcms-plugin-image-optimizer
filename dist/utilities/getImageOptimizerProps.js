@@ -32,6 +32,19 @@ import { thumbHashToDataURL } from 'thumbhash';
             }
         };
     }
+    // Prefer a pre-decoded blurDataURL when the plugin is configured with
+    // `storeBlurDataURL: true` — skips the per-render runtime decode cost. Falls
+    // through to the runtime path for docs uploaded before the flag was enabled.
+    const stored = resource.imageOptimizer?.blurDataURL;
+    if (stored) {
+        return {
+            placeholder: 'blur',
+            blurDataURL: stored,
+            style: {
+                objectPosition
+            }
+        };
+    }
     try {
         const bytes = Uint8Array.from(atob(thumbHash), (c)=>c.charCodeAt(0));
         const blurDataURL = thumbHashToDataURL(bytes);

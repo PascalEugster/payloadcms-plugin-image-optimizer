@@ -90,6 +90,7 @@ const buildConfigWithMemoryDB = async () => {
         maxDimensions: { width: 2560, height: 2560 },
         stripMetadata: true,
         generateThumbHash: true,
+        storeBlurDataURL: true,
         // generateFilename: uuidFilename,
       }),
     ],

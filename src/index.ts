@@ -45,7 +45,10 @@ export const imageOptimizer =
       }
 
       // Always inject fields for schema consistency (even when disabled)
-      const fields = [...collection.fields, getImageOptimizerField(pluginOptions.fieldsOverride)]
+      const fields = [...collection.fields, getImageOptimizerField({
+        fieldsOverride: pluginOptions.fieldsOverride,
+        storeBlurDataURL: resolvedConfig.storeBlurDataURL,
+      })]
 
       if (resolvedConfig.disabled) {
         return { ...collection, fields }

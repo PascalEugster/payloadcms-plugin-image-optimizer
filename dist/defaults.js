@@ -119,6 +119,7 @@ export const resolveConfig = (config)=>({
         regenerateButton: resolveRegenerateButton(config.regenerateButton),
         regenerateUseTransactions: config.regenerateUseTransactions ?? false,
         responseHeaders: config.responseHeaders ?? false,
+        storeBlurDataURL: config.storeBlurDataURL ?? false,
         stripMetadata: config.stripMetadata ?? true
     });
 export const resolveCollectionConfig = (resolvedConfig, collectionSlug)=>{

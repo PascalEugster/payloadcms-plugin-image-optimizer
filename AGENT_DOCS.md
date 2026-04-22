@@ -97,6 +97,7 @@ export type ImageOptimizerConfig = {
   format?: FormatQuality | null
   generateFilename?: GenerateFilename
   generateThumbHash?: boolean
+  storeBlurDataURL?: boolean
   maxDimensions?: { width: number; height: number }
   metadataPolicy?: MetadataPolicy
   regenerateButton?: boolean | RegenerateButtonConfig
@@ -113,6 +114,7 @@ export type ImageOptimizerConfig = {
 | `stripMetadata` | `boolean` | `true` | Sets `upload.withMetadata = false` AND ensures the plugin's injected `formatOptions`/`resizeOptions` always trigger sharp so EXIF is actually stripped (native Payload skips sharp — and preserves EXIF — when no transform is configured). Ignored when `metadataPolicy` is set. |
 | `metadataPolicy` | `(args: { metadata }) => boolean \| Promise<boolean>` | — | Richer alternative. Passed through as Payload's `withMetadata` callback. Return `true` to keep, `false` to strip. Takes precedence over `stripMetadata`. |
 | `generateThumbHash` | `boolean` | `true` | Plugin-owned. Runs inline in `beforeChange` — lands in the initial DB write. |
+| `storeBlurDataURL` | `boolean` | `false` | Opt-in. When `true`, appends a hidden, readOnly `imageOptimizer.blurDataURL` text field and pre-decodes the ThumbHash into its base64 PNG data URL once per upload in `beforeChange` via the internal `decodeThumbHashToDataURL()` helper. `getImageOptimizerProps()` prefers the stored value and skips the per-render `thumbHashToDataURL` decode. Falls back to runtime decode when the field is absent — full back-compat with docs uploaded before the flag was set. Trade-off: ~1–3 KB/doc extra on disk and in every listing-endpoint response. Backfill existing docs via the regeneration task (it re-runs `beforeChange`). |
 | `generateFilename` | `(args: GenerateFilenameArgs) => string` | — | Returns filename **stem** (no extension). Built-ins: `uuidFilename`, `seoFilename`, `timestampFilename`. **Incompatible with `clientUploads: true`** — blob pathname is locked at sign time (`@payloadcms/storage-vercel-blob`'s `getClientUploadRoute`); any rename in `beforeChange` would desync DB from blob. With `clientUploads: true`, use `addRandomSuffix: true` on the storage adapter instead. |
 | `clientOptimization` | `boolean` | `true` | Replace the admin upload component with `UploadOptimizer` (Canvas pre-resize). |
 | `regenerateButton` | `boolean \| { enabled?, allowForceAll? }` | `true` | Controls the collection-list regeneration button and whether "Force re-process all" is exposed. |
@@ -215,6 +217,7 @@ Otherwise:
 3. `optimizedSize = req.file.data.length` (this is the post-sharp buffer Payload will persist).
 4. Stamp `data.imageOptimizer = { originalSize, optimizedSize, status: 'complete', error: null }`.
 5. If `generateThumbHash`, run `generateThumbHash(req.file.data)` **inline** and set `data.imageOptimizer.thumbHash`. Lands in the same DB write.
+6. If `storeBlurDataURL` *and* the ThumbHash is present, run `decodeThumbHashToDataURL(thumbHash)` and set `data.imageOptimizer.blurDataURL`. Also inline, same DB write. Skipped when `storeBlurDataURL: false` (the default).
 
 No afterChange hook. No async jobs queued on upload. The doc is returned fully stamped.
 

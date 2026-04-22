@@ -247,6 +247,31 @@ export type ImageOptimizerConfig = {
      *
      * Non-override: respects an existing `upload.modifyResponseHeaders`. */
     responseHeaders?: ResponseHeadersOption;
+    /** Pre-compute and persist the ThumbHash-derived base64 PNG `blurDataURL`
+     *  on the media document at upload time, so `getImageOptimizerProps()` can
+     *  read it directly instead of decoding at every render.
+     *
+     *  Requires `generateThumbHash` to also be on (the value is derived from
+     *  the thumbhash). Has no effect when thumbhash generation is disabled.
+     *
+     *  When enabled:
+     *   - `beforeChange` runs `decodeThumbHashToDataURL()` once per upload and
+     *     persists the result to `imageOptimizer.blurDataURL`.
+     *   - `getImageOptimizerProps()` prefers the stored value; when absent it
+     *     falls back to runtime decode (full back-compat with old docs).
+     *   - The plugin's `imageOptimizer` group gains a hidden, readOnly
+     *     `blurDataURL` text field on targeted collections.
+     *
+     *  Trade-off: adds ~1–3 KB per media doc to both MongoDB storage and every
+     *  listing-endpoint response. Worth it when pages carry many images and
+     *  you've measured client-side decode cost as a TBT contributor.
+     *
+     *  Back-compat: old docs without the field fall through to runtime decode,
+     *  so flipping this on is non-breaking. Run the plugin's regeneration task
+     *  to backfill existing documents.
+     *
+     *  Defaults to `false`. */
+    storeBlurDataURL?: boolean;
     stripMetadata?: boolean;
 };
 export type ResolvedCollectionOptimizerConfig = {
@@ -276,8 +301,11 @@ export type ResolvedImageOptimizerConfig = {
     regenerateUseTransactions: boolean;
     /** Resolved response-header policy. Defaults to `false`. */
     responseHeaders: ResponseHeadersOption;
+    /** Resolved pre-decoded-blur flag. Defaults to `false`. */
+    storeBlurDataURL: boolean;
 } & Required<Pick<ImageOptimizerConfig, 'generateThumbHash' | 'maxDimensions' | 'stripMetadata'>>;
 export type ImageOptimizerData = {
+    blurDataURL?: null | string;
     thumbHash?: null | string;
 };
 export type MediaSizeVariant = {

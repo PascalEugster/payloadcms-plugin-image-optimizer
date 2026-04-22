@@ -32,7 +32,10 @@ export const imageOptimizer = (pluginOptions)=>(config)=>{
             // Always inject fields for schema consistency (even when disabled)
             const fields = [
                 ...collection.fields,
-                getImageOptimizerField(pluginOptions.fieldsOverride)
+                getImageOptimizerField({
+                    fieldsOverride: pluginOptions.fieldsOverride,
+                    storeBlurDataURL: resolvedConfig.storeBlurDataURL
+                })
             ];
             if (resolvedConfig.disabled) {
                 return {

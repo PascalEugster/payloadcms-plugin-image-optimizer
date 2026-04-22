@@ -96,6 +96,7 @@ export const resolveConfig = (config: ImageOptimizerConfig): ResolvedImageOptimi
   regenerateButton: resolveRegenerateButton(config.regenerateButton),
   regenerateUseTransactions: config.regenerateUseTransactions ?? false,
   responseHeaders: config.responseHeaders ?? false,
+  storeBlurDataURL: config.storeBlurDataURL ?? false,
   stripMetadata: config.stripMetadata ?? true,
 })
 

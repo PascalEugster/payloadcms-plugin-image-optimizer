@@ -25,7 +25,7 @@ Prefer to wire those yourself? You don't need this plugin for any of them.
 ### Things Payload does not do out of the box
 
 - **Client-side pre-resize** — Canvas-based resize in the browser *before* the file hits the network. Cuts 12MB DSLR photos to ~100–500KB pre-upload. Particularly important with `clientUploads: true` (Vercel Blob), where the server-side sharp pipeline is bypassed entirely.
-- **ThumbHash blur placeholders** — Tiny base64 hashes generated per image for instant blur-up previews.
+- **ThumbHash blur placeholders** — Tiny base64 hashes generated per image for instant blur-up previews. Opt-in `storeBlurDataURL` additionally pre-decodes the hash into its base64 PNG data URL at upload time, so rendering components can skip the per-render `thumbHashToDataURL` decode.
 - **Filename strategies** — Top-level `generateFilename` callback (Payload only exposes per-`imageSize.generateImageName`, not a parent-level one). Built-ins: `uuidFilename` (avoids Vercel Blob "already exists"), `seoFilename` (alt-text → slug), `timestampFilename`.
 - **Bulk regeneration UI** — One-click reprocess-all or reprocess-unoptimized from the admin, with progress tracking, stop button, and a REST API.
 - **Optimization status panel** — Admin sidebar showing original vs. optimized size, savings %, and blur preview.
@@ -110,6 +110,7 @@ imageOptimizer({
 | `format` | `FormatQuality \| null` | `{ format: 'webp', quality: 80 }` | Target format and quality (1-100). Pass `null` to disable format conversion (keep original extension). |
 | `maxDimensions` | `{ width: number, height: number }` | `{ width: 2560, height: 2560 }` | Maximum image dimensions. Images are resized to fit within these bounds. |
 | `generateThumbHash` | `boolean` | `true` | Generate ThumbHash blur placeholders for instant image previews. |
+| `storeBlurDataURL` | `boolean` | `false` | Opt-in: pre-decode the ThumbHash into its base64 PNG data URL at upload time and persist it as `imageOptimizer.blurDataURL`, so `getImageOptimizerProps()` skips the per-render `thumbHashToDataURL` decode. Trades ~1–3 KB extra per media doc (on disk *and* in every listing-endpoint response) for less client-side JS work on image-heavy pages. Back-compatible: existing docs uploaded before the flag was set continue to render via the runtime-decode fallback. See [Pre-decoded blur data URLs](#pre-decoded-blur-data-urls). |
 | `stripMetadata` | `boolean` | `true` | Sets `upload.withMetadata: false` AND guarantees sharp runs on every upload (Payload skips sharp entirely when no transform is configured, which preserves EXIF). Use `metadataPolicy` for richer control. |
 | `generateFilename` | `(args) => string` | — | Custom filename **stem** generator. Built-ins: `uuidFilename` (UUID — prevents Vercel Blob "already exists" errors), `seoFilename` (human-readable from alt text), `timestampFilename` (original filename stem + ISO timestamp with ms). **Note:** all filename strategies only work with server-side uploads (Payload default, `clientUploads: false`). With `clientUploads: true` the blob pathname is locked client-side before server hooks run, so `generateFilename` is effectively ignored — use `addRandomSuffix: true` on the storage adapter instead. See [Filename strategies and client uploads](#filename-strategies-and-client-uploads). |
 | `clientOptimization` | `boolean` | `true` | Pre-resize images in the browser before upload using Canvas API. Reduces upload size by up to 90% for large images. |
@@ -138,6 +139,27 @@ collections: {
   },
 }
 ```
+
+### Pre-decoded blur data URLs
+
+`getImageOptimizerProps()` normally runs `thumbHashToDataURL` on every render to turn a stored ThumbHash into a base64 PNG data URL. That helper is a JS-native inverse-DCT + manual Deflate/CRC/base64 PNG build — plugin consumers have observed empirically that each call costs roughly 1–5 ms per image on mid-tier Android. On listing pages with 20+ media items this can show up as measurable TBT.
+
+Setting `storeBlurDataURL: true` moves the decode to upload time:
+
+```ts
+imageOptimizer({
+  collections: { media: true },
+  storeBlurDataURL: true,
+})
+```
+
+When enabled, the `imageOptimizer` group gains a hidden, read-only `blurDataURL` text field. `beforeChange` pre-decodes the ThumbHash once per upload via the plugin's internal `decodeThumbHashToDataURL()` helper and persists the result. `getImageOptimizerProps()` then prefers the stored value and skips the per-render decode.
+
+**When to turn it on:** listings with many media items where you've observed client-side decode cost is non-trivial, and where the extra payload bytes are not a concern. Measure before flipping the flag — no benchmark has been run inside this plugin yet.
+
+**When to leave it off:** listing endpoints that return hundreds of media docs per request, where the ~1–3 KB/doc of extra wire payload matters more than the client-side decode it would save. The flag is off by default for this reason.
+
+**Back-compat:** flipping the flag on an existing site activates the new code path for new uploads. Old docs uploaded before the flag was set continue to render correctly via the runtime-decode fallback. To backfill them, click **Regenerate All Documents** in the admin collection list (or hit `POST /api/image-optimizer/regenerate`) — the regeneration task already re-runs `beforeChange`, so every processed doc gets the field populated. No new endpoint was added.
 
 ### Client-Side Optimization
 

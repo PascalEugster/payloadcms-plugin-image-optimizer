@@ -4,6 +4,7 @@ import type { CollectionBeforeChangeHook } from 'payload'
 
 import type { ResolvedImageOptimizerConfig } from '../types.js'
 import { generateThumbHash } from '../processing/index.js'
+import { decodeThumbHashToDataURL } from '../utilities/thumbhash.js'
 
 /**
  * Config-injection architecture.
@@ -160,7 +161,19 @@ export const createBeforeChangeHook = (
     // follow-up update that can fail on MongoDB transactions when cloud
     // storage is involved).
     if (resolvedConfig.generateThumbHash) {
-      data.imageOptimizer.thumbHash = await generateThumbHash(req.file.data)
+      const thumbHash = await generateThumbHash(req.file.data)
+      data.imageOptimizer.thumbHash = thumbHash
+
+      if (resolvedConfig.storeBlurDataURL) {
+        try {
+          data.imageOptimizer.blurDataURL = decodeThumbHashToDataURL(thumbHash)
+        } catch {
+          // Decode is deterministic from a valid thumbhash we just produced, so
+          // this catch should be unreachable — but guard defensively so a decode
+          // quirk never blocks an upload. Leaving blurDataURL absent lets the
+          // consumer's runtime-decode fallback take over.
+        }
+      }
     }
 
     return data
