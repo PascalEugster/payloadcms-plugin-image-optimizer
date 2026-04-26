@@ -110,15 +110,36 @@ export function createVariantLoader(media: MediaResource): ImageLoader | undefin
     ? `v=${encodeURIComponent(String(media.updatedAt))}`
     : ''
 
+  // Pre-resolve the largest valid variant once; closure-captured for the
+  // saturation check on each loader invocation. `getValidVariants` already
+  // sorted ascending, so the last entry is the widest aspect-matched variant
+  // (cover crops like `og`/`square` are filtered out — see v1.11.1).
+  const largestVariant = variants[variants.length - 1]
+  const sourceWidth = typeof media.width === 'number' ? media.width : null
+
+  // Cache-bust applier. Pre-generated variant URLs may already carry a query
+  // string (signed CDN URLs); append with `&` in that case.
+  const withCacheBust = (url: string): string => {
+    if (!encodedCacheBust) return url
+    const separator = url.includes('?') ? '&' : '?'
+    return `${url}${separator}${encodedCacheBust}`
+  }
+
   return ({ src, width, quality }) => {
     const match = findBestVariant(variants, width)
+    if (match) return withCacheBust(match.url)
 
-    if (match) {
-      if (!encodedCacheBust) return match.url
-      // If the pre-generated variant URL already has a query string
-      // (e.g. a signed CDN URL), append with `&` instead of `?`.
-      const separator = match.url.includes('?') ? '&' : '?'
-      return `${match.url}${separator}${encodedCacheBust}`
+    // Saturation: when the source has no more pixels than our largest
+    // variant, returning the largest variant URL is strictly better than
+    // routing through `/_next/image`. Next.js would re-derive the same
+    // pixels from the (already-saturated) parent file and add a network
+    // hop — same bytes, slower delivery. The condition `sourceWidth <=
+    // largestWidth` is the precise trigger: it means "no extra resolution
+    // exists anywhere." When the source is wider than the largest variant
+    // (the common case for fresh uploads above maxDimensions), `/_next/image`
+    // legitimately has more pixels to work with and we keep the fallback.
+    if (sourceWidth != null && largestVariant && sourceWidth <= largestVariant.width) {
+      return withCacheBust(largestVariant.url)
     }
 
     // Fall back to next/image optimization for unmatched widths. Pass through

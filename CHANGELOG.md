@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.5.2 — Saturate to the largest variant when the source has no more pixels
+
+`createVariantLoader()`'s fallback path sends every unmatched-width request through `/_next/image`. That's the right call when the parent file has more resolution than our largest pre-generated variant (e.g., a 2560×1920 source with a `large=1400w` variant) — Next.js can deliver more detail. But when the source itself has no more pixels than the largest variant — common on saturated parents whose dimensions equal the plugin's `maxDimensions` ceiling and are then mirrored by the largest configured `imageSize` — `/_next/image` was being asked to re-derive the same bytes from the parent and route them through an extra server hop. Same image, more latency, more compute, more cache fragmentation.
+
+### Fixed
+
+- **Saturation short-circuit in `createVariantLoader`.** When `findBestVariant` returns null AND `media.width <= largestVariant.width`, the loader now returns the largest aspect-matched variant URL directly (with the existing `updatedAt` cache-buster) instead of falling through to `/_next/image`. The condition is precise: it triggers only when no additional resolution exists anywhere for `/_next/image` to deliver. Sources wider than the largest variant — fresh uploads above `maxDimensions`, or any setup where the parent retains detail beyond the configured size set — keep the existing fallback path unchanged.
+
+### Internal
+
+- The largest variant and the source width are pre-resolved once when the loader closure is created; the per-call hot path stays a single comparison plus URL build.
+- Cache-bust application factored into a small `withCacheBust` helper used by both the matched-variant and saturation paths so the two share semantics.
+- `dev/responsiveImage.unit.spec.ts` adds four regression tests: saturation triggers when source equals largest, does not trigger when source exceeds largest, defensively skips when source dimensions are unknown, and the cache-buster still applies on the saturation path.
+
+---
+
 ## 3.5.1 — Stop hardcoding `q=80` in the variant loader fallback
 
 `createVariantLoader()` produces an `ImageLoader` for `next/image`. When a requested width has no matching pre-generated `imageSize` variant, the loader falls back to `/_next/image?...&q=${quality || 80}` so Next.js can run its own optimization. The hardcoded `80` default was a footgun: Next.js requires the requested `q` value to be listed in `next.config.images.qualities`, which defaults to `[75]`. Any consumer who didn't explicitly add `80` to that array got a `400 Bad Request` from `/_next/image` on every fallback render — and the only workaround was passing `quality={75}` on every `<Image>` site, which most consumers didn't know they had to do.

@@ -176,6 +176,78 @@ describe('createVariantLoader', () => {
     expect(url).not.toContain('q=80')
   })
 
+  test('saturates to the largest variant when the source has no more pixels (skips /_next/image hop)', () => {
+    // Source dimensions equal the largest variant — every pixel that exists
+    // is already in the variant, so /_next/image would just round-trip the
+    // same bytes through a server hop. Direct blob URL is strictly better.
+    const saturatedMedia: MediaResource = {
+      url: '/media/saturated.jpg',
+      width: 1400,
+      height: 1124,
+      sizes: {
+        thumbnail: { url: '/media/saturated-300.jpg', width: 300, height: 241 },
+        small: { url: '/media/saturated-600.jpg', width: 600, height: 482 },
+        medium: { url: '/media/saturated-900.jpg', width: 900, height: 723 },
+        large: { url: '/media/saturated-1400.jpg', width: 1400, height: 1124 },
+      },
+    }
+    const loader = createVariantLoader(saturatedMedia)!
+    const url = loader({ src: '/media/saturated.jpg', width: 3840 })
+
+    expect(url).toBe('/media/saturated-1400.jpg')
+    expect(url).not.toMatch(/^\/_next\/image/)
+  })
+
+  test('does NOT saturate when source still has pixels beyond the largest variant', () => {
+    // Source is 2560 (post-resize ceiling), largest variant is 1400 — the
+    // parent file has more detail than our largest variant, so /_next/image
+    // can legitimately deliver a higher-resolution render.
+    const wideMedia: MediaResource = {
+      url: '/media/wide.jpg',
+      width: 2560,
+      height: 2055,
+      sizes: {
+        large: { url: '/media/wide-1400.jpg', width: 1400, height: 1124 },
+      },
+    }
+    const loader = createVariantLoader(wideMedia)!
+    const url = loader({ src: '/media/wide.jpg', width: 3840 })
+
+    expect(url).toMatch(/^\/_next\/image\?/)
+    expect(url).toContain('w=3840')
+  })
+
+  test('does NOT saturate when source dimensions are unknown (defensive)', () => {
+    // Without resource.width we cannot prove saturation; conservatively fall
+    // back to /_next/image rather than guess.
+    const unknownDimsMedia: MediaResource = {
+      url: '/media/unknown.jpg',
+      sizes: {
+        large: { url: '/media/unknown-1400.jpg', width: 1400, height: 1124 },
+      },
+    }
+    const loader = createVariantLoader(unknownDimsMedia)!
+    const url = loader({ src: '/media/unknown.jpg', width: 3840 })
+
+    expect(url).toMatch(/^\/_next\/image\?/)
+  })
+
+  test('saturation path still applies the updatedAt cache-buster', () => {
+    const saturatedMedia: MediaResource = {
+      url: '/media/saturated.jpg',
+      width: 1400,
+      height: 1124,
+      updatedAt: '2026-04-26T10:00:00.000Z',
+      sizes: {
+        large: { url: '/media/saturated-1400.jpg', width: 1400, height: 1124 },
+      },
+    }
+    const loader = createVariantLoader(saturatedMedia)!
+    const url = loader({ src: '/media/saturated.jpg', width: 3840 })
+
+    expect(url).toMatch(/^\/media\/saturated-1400\.jpg\?v=/)
+  })
+
   test('returns undefined when media has no usable variants', () => {
     expect(createVariantLoader({ url: '/x.jpg', width: 100, height: 100 })).toBeUndefined()
   })
