@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.5.1 — Stop hardcoding `q=80` in the variant loader fallback
+
+`createVariantLoader()` produces an `ImageLoader` for `next/image`. When a requested width has no matching pre-generated `imageSize` variant, the loader falls back to `/_next/image?...&q=${quality || 80}` so Next.js can run its own optimization. The hardcoded `80` default was a footgun: Next.js requires the requested `q` value to be listed in `next.config.images.qualities`, which defaults to `[75]`. Any consumer who didn't explicitly add `80` to that array got a `400 Bad Request` from `/_next/image` on every fallback render — and the only workaround was passing `quality={75}` on every `<Image>` site, which most consumers didn't know they had to do.
+
+### Fixed
+
+- **`createVariantLoader` no longer emits `q=80` by default.** When the consumer's `<Image>` doesn't supply a `quality` prop, the loader now omits the `q` query param entirely and lets Next.js apply its server-side default — guaranteed to be in `images.qualities`. Explicit `quality` props are still passed through unchanged. This is a behavior fix only; URL shape changes only on the previously-broken fallback path.
+
+### Internal
+
+- `src/utilities/responsiveImage.ts` builds the `q=…` segment conditionally instead of unconditionally interpolating a fallback.
+- `dev/responsiveImage.unit.spec.ts` adds two regression tests: default-quality omission and pass-through of a non-default explicit quality.
+
+---
+
 ## 3.5.0 — Opt-in pre-decoded blur data URLs
 
 `getImageOptimizerProps()` runs `thumbHashToDataURL` on every render to turn a stored ThumbHash into a base64 PNG data URL. That helper is JS-native: an inverse-DCT decode into a small RGBA buffer, a manual Deflate stream, a CRC and base64 pack of the resulting PNG. Plugin consumers have reported empirically that the decode costs roughly 1–5 ms per image on mid-tier Android — small per image, but a listing with 20+ media items pays that cost 20+ times per render and it shows up as TBT. No benchmark has been run inside this plugin yet; measure before flipping the flag on.

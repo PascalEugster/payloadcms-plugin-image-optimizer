@@ -121,8 +121,15 @@ export function createVariantLoader(media: MediaResource): ImageLoader | undefin
       return `${match.url}${separator}${encodedCacheBust}`
     }
 
-    // Fall back to next/image optimization for unmatched widths
-    return `/_next/image?url=${encodeURIComponent(src)}&w=${width}&q=${quality || 80}`
+    // Fall back to next/image optimization for unmatched widths. Pass through
+    // the consumer's explicit `quality` prop, but omit `q` entirely when they
+    // haven't supplied one — Next.js then applies its server-side default
+    // (75, which is always present in `images.qualities`). Hardcoding a
+    // fallback of 80 here was a footgun: any consumer whose `next.config`
+    // qualities array didn't list 80 got `400` from `/_next/image` with no
+    // hint that the loader was the cause.
+    const q = quality ? `&q=${quality}` : ''
+    return `/_next/image?url=${encodeURIComponent(src)}&w=${width}${q}`
   }
 }
 

@@ -155,6 +155,27 @@ describe('createVariantLoader', () => {
     expect(url).toContain('q=75')
   })
 
+  test('falls back to /_next/image WITHOUT a `q` param when quality is omitted', () => {
+    // Regression: previously hardcoded `q=80`, which 400'd on any consumer
+    // whose `next.config.images.qualities` didn't list 80. Default behavior
+    // should defer to Next.js's server-side default (75), which is required
+    // to be in the qualities array.
+    const loader = createVariantLoader(portraitMedia)!
+    const url = loader({ src: '/media/pascal.jpg', width: 3840 })
+
+    expect(url).toMatch(/^\/_next\/image\?/)
+    expect(url).toContain('w=3840')
+    expect(url).not.toContain('q=')
+  })
+
+  test('falls back to /_next/image and passes through a non-default explicit quality', () => {
+    const loader = createVariantLoader(portraitMedia)!
+    const url = loader({ src: '/media/pascal.jpg', width: 3840, quality: 90 })
+
+    expect(url).toContain('q=90')
+    expect(url).not.toContain('q=80')
+  })
+
   test('returns undefined when media has no usable variants', () => {
     expect(createVariantLoader({ url: '/x.jpg', width: 100, height: 100 })).toBeUndefined()
   })
